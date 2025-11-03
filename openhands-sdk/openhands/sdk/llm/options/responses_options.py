@@ -23,6 +23,9 @@ def select_responses_options(
 
     # Enforce sampling/tool behavior for Responses path
     # Models that use Responses API don't need temperature set
+    # temperature = 1 is documented as default
+    # while other values 0..2 are documented to work, but don't appear to
+    # (400 from OpenAI)
     out.pop("temperature", None)
     out["tool_choice"] = "auto"
 
