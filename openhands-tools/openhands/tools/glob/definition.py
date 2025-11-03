@@ -89,6 +89,7 @@ class GlobTool(ToolDefinition[GlobAction, GlobObservation]):
     def create(
         cls,
         conv_state: "ConversationState",
+        **kwargs,  # noqa: ARG003
     ) -> Sequence["GlobTool"]:
         """Initialize GlobTool with a GlobExecutor.
 
