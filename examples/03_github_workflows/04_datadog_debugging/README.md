@@ -14,7 +14,8 @@ The workflow:
 ## Files
 
 - `workflow.yml` - GitHub Actions workflow with manual trigger
-- `agent_script.py` - Link to the main debugging script (see `examples/01_standalone_sdk/26_datadog_debugging.py`)
+- `datadog_debugging.py` - Main debugging script
+- `debug_prompt.jinja` - Template for AI debugging prompts
 
 ## Features
 
@@ -64,9 +65,11 @@ LLM_BASE_URL: Base URL for LLM service (optional)
 
 ### Installation
 
-1. Copy the entire `04_datadog_debugging/` directory to your repository's `examples/03_github_workflows/` directory
-2. Copy `workflow.yml` to your repository's `.github/workflows/` directory
-3. Configure the required secrets
+1. Copy `workflow.yml` to your repository's `.github/workflows/` directory (e.g., `.github/workflows/datadog-debugging.yml`)
+2. Configure the required secrets in repository Settings → Secrets and variables → Actions
+3. Optionally, customize the workflow inputs and defaults in the YAML file
+
+**Note**: The workflow automatically downloads the latest version of `datadog_debugging.py` and `debug_prompt.jinja` from the SDK repository at runtime. No need to copy these files to your repository unless you want to customize them.
 
 ## Usage
 
@@ -276,9 +279,9 @@ jobs:
 
 ## Related Examples
 
-- **Standalone Script**: `examples/01_standalone_sdk/26_datadog_debugging.py` - Core debugging logic
 - **Basic Action**: `examples/03_github_workflows/01_basic_action/` - Simple workflow example
 - **PR Review**: `examples/03_github_workflows/02_pr_review/` - PR automation example
+- **TODO Management**: `examples/03_github_workflows/03_todo_management/` - Automated TODO tracking
 
 ## Benefits
 
