@@ -1,0 +1,82 @@
+---
+name: Datadog Error Debugging
+
+on:
+    workflow_dispatch:
+        inputs:
+            datadog_query:
+                description: Datadog query to search for errors
+                required: true
+                default: service:deploy ClientDisconnect
+            repo_list:
+                description: Comma-separated list of repositories to clone (owner/repo)
+                required: true
+                default: OpenHands/OpenHands,All-Hands-AI/infra
+            issue_repo:
+                description: Repository to create/update issues in (owner/repo)
+                required: true
+                default: All-Hands-AI/infra
+            issue_parent:
+                description: Parent GitHub issue URL for tracking
+                required: false
+                default: https://github.com/All-Hands-AI/infra/issues/672
+            issue_prefix:
+                description: Prefix for issue titles
+                required: false
+                default: 'DataDog Error: '
+            max_errors:
+                description: Maximum number of errors to fetch
+                required: false
+                default: '5'
+            llm_model:
+                description: LLM model to use for analysis
+                required: false
+                default: openhands/claude-sonnet-4-5-20250929
+
+permissions:
+    contents: read
+    issues: write
+
+jobs:
+    debug-datadog-errors:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  enable-cache: true
+
+            - name: Install dependencies
+              run: uv sync --frozen
+
+            - name: Run Datadog Debugging Script
+              env:
+                  DD_API_KEY: ${{ secrets.DD_API_KEY }}
+                  DD_APP_KEY: ${{ secrets.DD_APP_KEY }}
+                  DD_SITE: ${{ secrets.DD_SITE }}
+                  LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+                  LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+                  LLM_MODEL: ${{ inputs.llm_model }}
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  mkdir -p /tmp/datadog-debug
+                  uv run python examples/01_standalone_sdk/26_datadog_debugging.py \
+                    --query "${{ inputs.datadog_query }}" \
+                    --repos "${{ inputs.repo_list }}" \
+                    --working-dir "/tmp/datadog-debug" \
+                    --issue-repo "${{ inputs.issue_repo }}" \
+                    --issue-parent "${{ inputs.issue_parent }}" \
+                    --issue-prefix "${{ inputs.issue_prefix }}" \
+                    --max-errors "${{ inputs.max_errors }}"
+
+            - name: Upload debugging artifacts
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: datadog-debugging-artifacts
+                  path: /tmp/datadog-debug/
+                  retention-days: 7
