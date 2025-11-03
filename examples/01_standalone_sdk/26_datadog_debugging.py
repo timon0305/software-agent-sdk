@@ -12,13 +12,13 @@ The agent will:
 5. Optionally create a draft PR with a fix
 
 Usage:
-    python 14_datadog_debugging.py --query "status:error service:deploy" \\
+    python 26_datadog_debugging.py --query "status:error service:deploy" \\
         --repos "All-Hands-AI/OpenHands,All-Hands-AI/deploy"
 
 Environment Variables Required:
     - DD_API_KEY: Your Datadog API key
     - DD_APP_KEY: Your Datadog application key
-    - DD_SITE: (optional) Datadog site, e.g., datadoghq.com, datadoghq.eu, us5.datadoghq.com
+    - DD_SITE: (optional) Datadog site (e.g., datadoghq.com, datadoghq.eu)
     - GITHUB_TOKEN: Your GitHub personal access token
     - LLM_API_KEY: API key for the LLM service
 """
@@ -76,7 +76,7 @@ def validate_environment():
 def create_debugging_prompt(query: str, repos: list[str]) -> str:
     """Create the debugging prompt for the agent."""
     repos_list = "\n".join(f"- {repo}" for repo in repos)
-    
+
     # Construct the API URL based on DD_SITE environment variable
     dd_site = os.getenv("DD_SITE", "datadoghq.com")
     if dd_site == "datadoghq.com":
@@ -92,10 +92,10 @@ def create_debugging_prompt(query: str, repos: list[str]) -> str:
         "via curl commands with your DD_API_KEY and DD_APP_KEY "
         "environment variables.\n\n"
     )
-    
+
     if region_note:
         prompt += f"{region_note}\n\n"
-    
+
     prompt += (
         "To query Datadog logs, use the Logs API:\n"
         "```bash\n"
@@ -149,7 +149,7 @@ def create_debugging_prompt(query: str, repos: list[str]) -> str:
         "Use the task_tracker tool to organize your work and keep track "
         "of your progress through these steps."
     )
-    
+
     return prompt
 
 
