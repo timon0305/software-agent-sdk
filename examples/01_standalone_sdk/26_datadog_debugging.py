@@ -30,6 +30,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import SecretStr
 
@@ -212,7 +213,287 @@ def fetch_datadog_errors(query: str, working_dir: Path, limit: int = 5) -> Path:
     return errors_file
 
 
-def create_debugging_prompt(query: str, repos: list[str], errors_file: Path) -> str:
+def create_unique_identifier(query: str, errors_data: dict) -> str:
+    """
+    Create a unique identifier for the error based on query or issue ID.
+
+    Args:
+        query: The Datadog query string
+        errors_data: The parsed error data from datadog_errors.json
+
+    Returns:
+        Unique identifier string
+    """
+    # Check if we have a specific issue ID
+    examples = errors_data.get("examples", [])
+    if examples and examples[0].get("issue_id"):
+        issue_id = examples[0]["issue_id"]
+        return f"error-id: {issue_id}"
+    else:
+        # Use query as identifier
+        return f"query: {query}"
+
+
+def search_existing_issue(
+    issue_repo: str, identifier: str, github_token: str
+) -> int | None:
+    """
+    Search for existing GitHub issues containing the identifier.
+
+    Args:
+        issue_repo: Repository in format 'owner/repo'
+        identifier: Unique identifier to search for
+        github_token: GitHub API token
+
+    Returns:
+        Issue number if found, None otherwise
+    """
+    print(f"🔍 Searching for existing issue with identifier: {identifier}")
+
+    # Search issues in the repository
+    search_query = f'repo:{issue_repo} is:issue "{identifier}"'
+    encoded_query = quote(search_query)
+    url = "https://api.github.com/search/issues"
+
+    result = subprocess.run(
+        [
+            "curl",
+            "-s",
+            "-H",
+            f"Authorization: Bearer {github_token}",
+            "-H",
+            "Accept: application/vnd.github+json",
+            f"{url}?q={encoded_query}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    try:
+        data = json.loads(result.stdout)
+        items = data.get("items", [])
+        if items:
+            # Sort by created_at to get the oldest issue (first created)
+            items_sorted = sorted(items, key=lambda x: x["created_at"])
+            issue_number = items_sorted[0]["number"]
+            print(f"✅ Found existing issue #{issue_number} (oldest of {len(items)})")
+            return issue_number
+        else:
+            print("❌ No existing issue found")
+            return None
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"⚠️  Error searching for issues: {e}")
+        return None
+
+
+def create_github_issue(
+    issue_repo: str,
+    title: str,
+    body: str,
+    github_token: str,
+) -> int:
+    """
+    Create a new GitHub issue.
+
+    Args:
+        issue_repo: Repository in format 'owner/repo'
+        title: Issue title
+        body: Issue body content
+        github_token: GitHub API token
+
+    Returns:
+        Created issue number
+    """
+    print(f"📝 Creating new issue: {title}")
+
+    url = f"https://api.github.com/repos/{issue_repo}/issues"
+
+    payload = {"title": title, "body": body}
+
+    result = subprocess.run(
+        [
+            "curl",
+            "-s",
+            "-X",
+            "POST",
+            url,
+            "-H",
+            f"Authorization: Bearer {github_token}",
+            "-H",
+            "Accept: application/vnd.github+json",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            json.dumps(payload),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    try:
+        data = json.loads(result.stdout)
+        issue_number = data["number"]
+        issue_url = data["html_url"]
+        print(f"✅ Created issue #{issue_number}: {issue_url}")
+        return issue_number
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"❌ Error creating issue: {e}")
+        print(f"Response: {result.stdout[:500]}")
+        sys.exit(1)
+
+
+def format_issue_body(
+    errors_data: dict,
+    identifier: str,
+    parent_issue_url: str | None,
+) -> str:
+    """
+    Format the GitHub issue body with error details.
+
+    Args:
+        errors_data: The parsed error data
+        identifier: Unique identifier
+        parent_issue_url: Optional parent issue URL
+
+    Returns:
+        Formatted issue body
+    """
+    examples = errors_data.get("examples", [])
+    query = errors_data.get("query", "")
+
+    body_parts = []
+
+    # Add parent issue reference if provided
+    if parent_issue_url:
+        body_parts.append(f"**Parent Issue:** {parent_issue_url}\n")
+
+    # Add identifier for searchability
+    body_parts.append(f"**Identifier:** `{identifier}`\n")
+
+    # Add query info
+    body_parts.append(f"**Query:** `{query}`\n")
+
+    # Add error summary
+    if examples:
+        first_example = examples[0]
+        body_parts.append("## Error Summary\n")
+
+        if first_example.get("issue_id"):
+            body_parts.append(f"- **Issue ID:** `{first_example['issue_id']}`")
+        if first_example.get("total_count"):
+            body_parts.append(
+                f"- **Total Occurrences:** {first_example['total_count']}"
+            )
+        if first_example.get("error_type"):
+            body_parts.append(f"- **Error Type:** `{first_example['error_type']}`")
+        if first_example.get("service"):
+            body_parts.append(f"- **Service:** `{first_example['service']}`")
+        if first_example.get("file_path"):
+            body_parts.append(f"- **File:** `{first_example['file_path']}`")
+        if first_example.get("function_name"):
+            body_parts.append(f"- **Function:** `{first_example['function_name']}`")
+        if first_example.get("state"):
+            body_parts.append(f"- **State:** {first_example['state']}")
+
+        body_parts.append("")
+
+        # Add error message if available
+        if first_example.get("error_message"):
+            body_parts.append("## Error Message\n")
+            body_parts.append("```")
+            body_parts.append(first_example["error_message"])
+            body_parts.append("```\n")
+
+    # Add note about full data
+    body_parts.append("## Full Error Data\n")
+    body_parts.append(
+        "The complete error tracking data has been saved and will be analyzed "
+        "by the debugging agent.\n"
+    )
+
+    # Add JSON data as collapsible section
+    body_parts.append("<details>")
+    body_parts.append("<summary>View Full Error Data (JSON)</summary>\n")
+    body_parts.append("```json")
+    body_parts.append(json.dumps(errors_data, indent=2))
+    body_parts.append("```")
+    body_parts.append("</details>\n")
+
+    body_parts.append("---")
+    body_parts.append(
+        "*This issue is being tracked by an automated debugging agent. "
+        "Analysis findings will be posted as comments below.*"
+    )
+
+    return "\n".join(body_parts)
+
+
+def setup_github_issue(
+    query: str,
+    errors_file: Path,
+    issue_repo: str,
+    issue_prefix: str,
+    issue_parent: str | None,
+) -> tuple[int, str]:
+    """
+    Create or find GitHub issue for tracking debugging progress.
+
+    Args:
+        query: The Datadog query
+        errors_file: Path to the errors JSON file
+        issue_repo: GitHub repository for issues
+        issue_prefix: Prefix for issue titles
+        issue_parent: Optional parent issue URL
+
+    Returns:
+        Tuple of (issue_number, issue_url)
+    """
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token:
+        print("❌ GITHUB_TOKEN environment variable not set")
+        sys.exit(1)
+
+    # Load error data
+    with open(errors_file) as f:
+        errors_data = json.load(f)
+
+    # Create unique identifier
+    identifier = create_unique_identifier(query, errors_data)
+
+    # Search for existing issue
+    issue_number = search_existing_issue(issue_repo, identifier, github_token)
+
+    if issue_number:
+        # Return existing issue
+        issue_url = f"https://github.com/{issue_repo}/issues/{issue_number}"
+        return issue_number, issue_url
+
+    # Create new issue
+    # Determine title from error data
+    examples = errors_data.get("examples", [])
+    if examples and examples[0].get("error_type"):
+        error_name = examples[0]["error_type"]
+    else:
+        # Use query as fallback
+        error_name = query[:50]  # Limit length
+
+    title = f"{issue_prefix}{error_name}"
+
+    # Format issue body
+    body = format_issue_body(errors_data, identifier, issue_parent)
+
+    # Create issue
+    issue_number = create_github_issue(issue_repo, title, body, github_token)
+    issue_url = f"https://github.com/{issue_repo}/issues/{issue_number}"
+
+    return issue_number, issue_url
+
+
+def create_debugging_prompt(
+    query: str, repos: list[str], errors_file: Path, issue_url: str
+) -> str:
     """Create the debugging prompt for the agent."""
     repos_list = "\n".join(f"- {repo}" for repo in repos)
     dd_site = os.getenv("DD_SITE", "datadoghq.com")
@@ -222,6 +503,24 @@ def create_debugging_prompt(query: str, repos: list[str], errors_file: Path) -> 
     prompt = (
         "Your task is to debug an error from Datadog Error Tracking to find "
         "out why it is happening.\n\n"
+        "## GitHub Issue for Tracking\n\n"
+        f"A GitHub issue has been created to track this investigation: {issue_url}\n\n"
+        "**IMPORTANT**: As you make progress in your investigation, post your "
+        "findings as comments on this GitHub issue using curl commands:\n\n"
+        "```bash\n"
+        "curl -X POST \\\n"
+        f"  'https://api.github.com/repos/{{REPO}}/issues/{{NUMBER}}/comments' \\\n"
+        "  -H 'Authorization: Bearer $GITHUB_TOKEN' \\\n"
+        "  -H 'Accept: application/vnd.github+json' \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        '  -d \'{"body": "Your finding here"}\'\n'
+        "```\n\n"
+        "Post updates when you:\n"
+        "- Complete analyzing the error data\n"
+        "- Find relevant code in the repositories\n"
+        "- Identify the root cause\n"
+        "- Attempt a reproduction\n"
+        "- Make any significant discovery\n\n"
         "## Error Tracking Issues\n\n"
         f"I have already fetched error tracking issues and saved them to: "
         f"`{errors_file}`\n\n"
@@ -240,9 +539,10 @@ def create_debugging_prompt(query: str, repos: list[str], errors_file: Path) -> 
         "  - `first_seen`: Timestamp when first seen (milliseconds)\n"
         "  - `last_seen`: Timestamp when last seen (milliseconds)\n"
         "  - `state`: Issue state (OPEN, ACKNOWLEDGED, RESOLVED, etc.)\n\n"
-        "**First, read this file** using str_replace_editor to understand the "
-        "error patterns. Error Tracking aggregates similar errors together, so "
-        "each issue may represent many occurrences.\n\n"
+        "**First, read the GitHub issue** to see the error summary, then read "
+        f"`{errors_file}` to understand the error patterns. Error Tracking "
+        "aggregates similar errors together, so each issue may represent many "
+        "occurrences.\n\n"
         "## Additional Context\n\n"
         f"The original Datadog query was: `{query}`\n\n"
         "If you need more details, you can use Datadog APIs via curl commands "
@@ -351,6 +651,22 @@ def main():
         help="Working directory for cloning repos and analysis "
         "(default: ./datadog_debug_workspace)",
     )
+    parser.add_argument(
+        "--issue-repo",
+        required=True,
+        help="GitHub repository for creating/updating issues "
+        "(e.g., 'All-Hands-AI/infra')",
+    )
+    parser.add_argument(
+        "--issue-parent",
+        help="Parent issue URL to reference (e.g., "
+        "'https://github.com/All-Hands-AI/infra/issues/672')",
+    )
+    parser.add_argument(
+        "--issue-prefix",
+        default="",
+        help="Prefix to add to issue titles (e.g., 'DataDog Error Bash: ')",
+    )
 
     args = parser.parse_args()
 
@@ -376,6 +692,18 @@ def main():
     errors_file = fetch_datadog_errors(args.query, working_dir)
     print()
 
+    # Setup GitHub issue for tracking
+    print("📋 Setting up GitHub issue for tracking...")
+    issue_number, issue_url = setup_github_issue(
+        args.query,
+        errors_file,
+        args.issue_repo,
+        args.issue_prefix,
+        args.issue_parent,
+    )
+    print(f"📌 Tracking issue: {issue_url}")
+    print()
+
     # Configure LLM
     api_key = os.getenv("LLM_API_KEY")
     if not api_key:
@@ -393,7 +721,7 @@ def main():
     )
 
     # Run debugging session
-    run_debugging_session(llm, working_dir, args.query, repos, errors_file)
+    run_debugging_session(llm, working_dir, args.query, repos, errors_file, issue_url)
 
 
 def run_debugging_session(
@@ -402,6 +730,7 @@ def run_debugging_session(
     query: str,
     repos: list[str],
     errors_file: Path,
+    issue_url: str,
 ):
     """Run the debugging session with the given configuration."""
     # Register and set up tools
@@ -431,7 +760,7 @@ def run_debugging_session(
     )
 
     # Send the debugging task
-    debugging_prompt = create_debugging_prompt(query, repos, errors_file)
+    debugging_prompt = create_debugging_prompt(query, repos, errors_file, issue_url)
 
     conversation.send_message(
         message=Message(
