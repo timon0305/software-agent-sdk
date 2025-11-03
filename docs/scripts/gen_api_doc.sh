@@ -16,11 +16,27 @@ mkdir -p "$OUTPUT_DIR"
 
 # Generate using pdoc (isolated via uvx to avoid workspace dependency conflicts)
 export PYTHONPATH="$REPO_ROOT/openhands-sdk:$PYTHONPATH"
-PYTHONPATH="$REPO_ROOT/openhands-sdk:$PYTHONPATH" uvx --from griffe2md griffe2md openhands.sdk -o "$OUTPUT_DIR/index.mdx"
+# Note: we avoid generating the top-level package in one shot because griffe2md
+# may stumble on some namespace subpackages (e.g. ones without __init__.py).
+# Instead we generate per-subpackage pages and build our own index below.
 
-# Split per-top-level subpackage into individual pages for navigation clarity
+# Split per-top-level subpackage into individual pages for navigation clarity.
+# Skip internal/non-essential namespaces that may cause issues with generators.
+SKIP_PKGS=(git)
+should_skip() {
+  local x="$1"
+  for s in "${SKIP_PKGS[@]}"; do
+    if [[ "$x" == "$s" ]]; then return 0; fi
+  done
+  return 1
+}
+
 while IFS= read -r -d '' pkg; do
   name=$(basename "$pkg")
+  if should_skip "$name"; then
+    echo "[gen_api_doc] Skipping package: $name"
+    continue
+  fi
   PYTHONPATH="$REPO_ROOT/openhands-sdk:$PYTHONPATH" uvx --from griffe2md griffe2md "openhands.sdk.$name" -o "$OUTPUT_DIR/$name.md"
 done < <(find "$REPO_ROOT/openhands-sdk/openhands/sdk" -maxdepth 1 -mindepth 1 -type d ! -name '__pycache__' -print0)
 
