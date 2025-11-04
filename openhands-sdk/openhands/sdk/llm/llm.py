@@ -697,8 +697,6 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin, ResponseNormalizerMi
     # Capabilities, formatting, and info
     # =========================================================================
     def _init_model_info_and_caps(self) -> None:
-        # Check if this model doesn't support native tool calling
-
         # Try to get model info via openrouter or litellm proxy first
         tried = False
         try:
