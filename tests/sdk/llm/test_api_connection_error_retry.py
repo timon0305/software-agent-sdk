@@ -335,3 +335,40 @@ def test_completion_max_retries_internal_server_error(
 
     # Ensure the original provider exception is preserved as the cause
     assert isinstance(excinfo.value.__cause__, InternalServerError)
+
+
+@patch("openhands.sdk.llm.llm.litellm_completion")
+def test_llm_service_unavailable_error_direct_retry(
+    mock_litellm_completion, default_config
+):
+    """Test that LLMServiceUnavailableError raised directly is retried.
+
+    This test mocks _transport_call to raise LLMServiceUnavailableError
+    directly, simulating scenarios where SDK exceptions are raised within
+    the retry boundary (e.g., from other code paths or future changes).
+    """
+    mock_response = create_mock_response("Success after direct SDK error")
+
+    # Directly raise the SDK exception to verify it's in retry list
+    mock_litellm_completion.side_effect = [
+        LLMServiceUnavailableError("Service temporarily unavailable"),
+        mock_response,
+    ]
+
+    llm = LLM(
+        model="gpt-4o",
+        api_key=SecretStr("test_key"),
+        num_retries=2,
+        retry_min_wait=1,
+        retry_max_wait=2,
+        usage_id="test-service",
+    )
+
+    response = llm.completion(
+        messages=[Message(role="user", content=[TextContent(text="Hello!")])],
+    )
+
+    # Should successfully retry when LLMServiceUnavailableError is raised
+    assert isinstance(response, LLMResponse)
+    assert response.raw_response == mock_response
+    assert mock_litellm_completion.call_count == 2
