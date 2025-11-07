@@ -38,8 +38,8 @@ assert api_key is not None, "LLM_API_KEY environment variable is not set."
 model = os.getenv("LLM_MODEL", "claude-sonnet-4-20250514")
 base_url = os.getenv("LLM_BASE_URL")
 
-# Configure primary and fallback LLMs
-# Primary: A powerful but potentially rate-limited model
+# Configure LLMs for fallback
+# First model: A powerful but potentially rate-limited model
 primary_llm = LLM(
     usage_id="primary",
     model=model,
@@ -47,7 +47,7 @@ primary_llm = LLM(
     api_key=SecretStr(api_key),
 )
 
-# Fallback 1: A reliable alternative model
+# Second model: A reliable alternative model
 # In a real scenario, this might be a different provider or cheaper model
 fallback_llm = LLM(
     usage_id="fallback",
@@ -56,15 +56,12 @@ fallback_llm = LLM(
     api_key=SecretStr(api_key),
 )
 
-# Create FallbackRouter
-# Models will be tried in the order they appear in the dictionary
-# Note: The first model must have key "primary"
+# Create FallbackRouter with a list of LLMs
+# Models will be tried in the order they appear in the list
+# Similar to how litellm handles fallbacks
 fallback_router = FallbackRouter(
     usage_id="fallback-router",
-    llms_for_routing={
-        "primary": primary_llm,
-        "fallback": fallback_llm,
-    },
+    llms=[primary_llm, fallback_llm],
 )
 
 # Configure agent with fallback router
@@ -74,8 +71,8 @@ agent = Agent(llm=fallback_router, tools=tools)
 # Create conversation
 conversation = Conversation(agent=agent, workspace=os.getcwd())
 
-# Send a message - the router will automatically try primary first,
-# then fall back if needed
+# Send a message - the router will automatically try models in order,
+# falling back if one fails
 conversation.send_message(
     message=Message(
         role="user",

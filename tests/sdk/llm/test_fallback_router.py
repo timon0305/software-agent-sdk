@@ -69,23 +69,23 @@ def test_messages():
 
 
 def test_fallback_router_creation(primary_llm, fallback_llm):
-    """Test that FallbackRouter can be created with primary and fallback models."""
+    """Test that FallbackRouter can be created with a list of models."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
     assert router.router_name == "fallback_router"
-    assert len(router.llms_for_routing) == 2
-    assert "primary" in router.llms_for_routing
-    assert "fallback" in router.llms_for_routing
+    assert len(router.llms) == 2
+    assert router.llms[0] == primary_llm
+    assert router.llms[1] == fallback_llm
 
 
-def test_fallback_router_requires_primary(fallback_llm):
-    """Test that FallbackRouter requires a 'primary' model."""
-    with pytest.raises(ValueError, match="Primary LLM key 'primary' not found"):
+def test_fallback_router_requires_at_least_one_llm():
+    """Test that FallbackRouter requires at least one LLM."""
+    with pytest.raises(ValueError, match="at least one LLM"):
         FallbackRouter(
             usage_id="test-router",
-            llms_for_routing={"fallback": fallback_llm},
+            llms=[],
         )
 
 
@@ -93,7 +93,7 @@ def test_fallback_router_success_with_primary(primary_llm, fallback_llm, test_me
     """Test that router uses primary model when it succeeds."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
 
     mock_response = create_mock_response(content="Primary response", model="gpt-4")
@@ -118,7 +118,7 @@ def test_fallback_router_falls_back_on_rate_limit(
     """Test that router falls back to secondary model on rate limit error."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
 
     mock_fallback_response = create_mock_response(
@@ -157,7 +157,7 @@ def test_fallback_router_falls_back_on_connection_error(
     """Test that router falls back on API connection error."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
 
     mock_fallback_response = create_mock_response(
@@ -188,7 +188,7 @@ def test_fallback_router_raises_when_all_fail(primary_llm, fallback_llm, test_me
     """Test that router raises exception when all models fail."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
 
     with (
@@ -238,11 +238,7 @@ def test_fallback_router_with_multiple_fallbacks(test_messages):
 
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={
-            "primary": primary,
-            "fallback1": fallback1,
-            "fallback2": fallback2,
-        },
+        llms=[primary, fallback1, fallback2],
     )
 
     mock_response = create_mock_response(
@@ -281,13 +277,13 @@ def test_fallback_router_with_multiple_fallbacks(test_messages):
         assert router.active_llm == fallback2
 
 
-def test_fallback_router_select_llm_returns_primary(primary_llm, fallback_llm):
-    """Test that select_llm always returns primary key."""
+def test_fallback_router_select_llm_returns_first(primary_llm, fallback_llm):
+    """Test that select_llm always returns the first LLM's key."""
     router = FallbackRouter(
         usage_id="test-router",
-        llms_for_routing={"primary": primary_llm, "fallback": fallback_llm},
+        llms=[primary_llm, fallback_llm],
     )
 
     messages = [Message(role="user", content=[TextContent(text="Test")])]
     selected = router.select_llm(messages)
-    assert selected == "primary"
+    assert selected == "llm_0"
