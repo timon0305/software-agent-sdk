@@ -343,8 +343,8 @@ class FileEditor:
                 image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
                 mime_type, _ = mimetypes.guess_type(str(path))
-                if not mime_type or not mime_type.startswith('image/'):
-                    mime_type = 'image/png'
+                if not mime_type or not mime_type.startswith("image/"):
+                    mime_type = "image/png"
                 output_msg = (
                     f"Image file {path} read successfully. Displaying image content."
                 )
