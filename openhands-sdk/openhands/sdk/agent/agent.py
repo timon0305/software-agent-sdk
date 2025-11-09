@@ -161,12 +161,17 @@ class Agent(AgentBase):
                 e for e in state.events if isinstance(e, LLMConvertibleEvent)
             ]
 
-        # Record conversation metadata for telemetry/logging
-        if hasattr(self.llm, "metadata"):
-            self.llm.metadata["conversation_id"] = str(state.id)
-            persistence_dir = getattr(state, "persistence_dir", None)
-            if persistence_dir:
-                self.llm.metadata["conversation_path"] = persistence_dir
+        # Attach conversation metadata for telemetry/logging correlation
+        ctx = {
+            "conversation_id": str(conversation.id),
+            "conversation_path": conversation.state.persistence_dir,
+        }
+        # Store under a namespaced key to avoid collisions with provider params
+        try:
+            self.llm.litellm_extra_body.setdefault("openhands_context", {}).update(ctx)
+        except Exception:
+            # Best-effort; do not fail agent step on metadata propagation issues
+            pass
 
         # Get LLM Response (Action)
         _messages = LLMConvertibleEvent.events_to_messages(llm_convertible_events)

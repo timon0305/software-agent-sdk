@@ -449,7 +449,7 @@ def build_llm_turns(
                 observations=obs_map,
                 assistant_messages=assistant_records,
                 extra_events=[
-                    ev for ev in extra_events if _event_belongs_to_response(ev, resp_id)
+                    ev for ev in extra_events if _event_belongs_to_response(ev)
                 ],
             )
         )
@@ -457,7 +457,7 @@ def build_llm_turns(
     return llm_turns
 
 
-def _event_belongs_to_response(record: EventRecord, response_id: str) -> bool:
+def _event_belongs_to_response(record: EventRecord) -> bool:
     event = record.event
     if isinstance(event, Condensation):
         return False
@@ -469,7 +469,7 @@ def message_text(message: Message) -> str:
     return "\n\n".join(parts)
 
 
-def render_log_prompt(turn: LLMTurn, color: str) -> None:
+def render_log_prompt(turn: LLMTurn) -> None:
     log = turn.log
     if not log:
         st.info("No LLM log found for this response ID.")
@@ -501,7 +501,7 @@ def render_log_prompt(turn: LLMTurn, color: str) -> None:
             st.json(tools)
 
 
-def render_log_response(turn: LLMTurn, color: str) -> None:
+def render_log_response(turn: LLMTurn) -> None:
     log = turn.log
     if not log:
         st.info("No LLM log available for this response ID.")
@@ -533,7 +533,7 @@ def render_log_response(turn: LLMTurn, color: str) -> None:
             continue
         item_type = item.get("type", "unknown")
         if item_type == "reasoning":
-            render_section_label("Reasoning", color)
+            render_section_label("Reasoning", "#1f6feb")
             summary = item.get("summary")
             if summary:
                 st.write("\n".join(summary))
@@ -544,11 +544,11 @@ def render_log_response(turn: LLMTurn, color: str) -> None:
             if item.get("encrypted_content"):
                 st.info("Encrypted reasoning payload present (not displayed).")
         elif item_type == "message":
-            render_section_label("Assistant message", color)
+            render_section_label("Assistant message", "#1f6feb")
             content = extract_text_chunks(item.get("content") or [])
             st.code(content or "[empty]")
         elif item_type == "function_call":
-            render_section_label("Tool call", color)
+            render_section_label("Tool call", "#1f6feb")
             st.code(
                 json.dumps(
                     {
@@ -562,7 +562,7 @@ def render_log_response(turn: LLMTurn, color: str) -> None:
                 )
             )
         elif item_type == "tool_result":
-            render_section_label("Tool result", color)
+            render_section_label("Tool result", "#1f6feb")
             st.code(json.dumps(item, indent=2, ensure_ascii=False))
         else:
             with st.expander(f"Response item ({item_type})", expanded=False):
@@ -578,10 +578,10 @@ def render_turn(turn: LLMTurn) -> None:
     cols = st.columns(2)
     with cols[0]:
         st.markdown("### Prompt")
-        render_log_prompt(turn, "#1f6feb")
+        render_log_prompt(turn)
     with cols[1]:
         st.markdown("### Response")
-        render_log_response(turn, "#1f6feb")
+        render_log_response(turn)
 
     if turn.actions:
         st.markdown("### Agent actions")
