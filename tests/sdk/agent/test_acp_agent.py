@@ -1,6 +1,6 @@
 """Test ACPAgent functionality."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -34,48 +34,66 @@ def test_acp_agent_with_args():
 
 def test_acp_agent_rejects_tools():
     """Test that ACPAgent raises error when tools are provided."""
+    import openhands.sdk.agent.acp_agent as acp_module
     from openhands.sdk.conversation.state import ConversationState
 
-    agent = ACPAgent(
-        acp_command=["test"],
-        tools=[Tool(name="test_tool")],
-    )
-    state = Mock(spec=ConversationState)
+    # Temporarily enable ACP to test the tools check
+    original_available = acp_module._ACP_AVAILABLE
+    try:
+        acp_module._ACP_AVAILABLE = True
+        agent = ACPAgent(
+            acp_command=["test"],
+            tools=[Tool(name="test_tool")],
+        )
+        state = Mock(spec=ConversationState)
 
-    with pytest.raises(
-        NotImplementedError, match="ACPAgent does not yet support custom tools"
-    ):
-        agent.init_state(state, on_event=Mock())
+        with pytest.raises(
+            NotImplementedError, match="ACPAgent does not yet support custom tools"
+        ):
+            agent.init_state(state, on_event=Mock())
+    finally:
+        acp_module._ACP_AVAILABLE = original_available
 
 
 def test_acp_agent_rejects_mcp_config():
     """Test that ACPAgent raises error when MCP config is provided."""
+    import openhands.sdk.agent.acp_agent as acp_module
     from openhands.sdk.conversation.state import ConversationState
 
-    agent = ACPAgent(
-        acp_command=["test"],
-        mcp_config={"test": "config"},
-    )
+    # Temporarily enable ACP to test the MCP config check
+    original_available = acp_module._ACP_AVAILABLE
+    try:
+        acp_module._ACP_AVAILABLE = True
+        agent = ACPAgent(
+            acp_command=["test"],
+            mcp_config={"test": "config"},
+        )
+        state = Mock(spec=ConversationState)
+
+        with pytest.raises(
+            NotImplementedError, match="ACPAgent does not yet support MCP"
+        ):
+            agent.init_state(state, on_event=Mock())
+    finally:
+        acp_module._ACP_AVAILABLE = original_available
+
+
+def test_acp_agent_missing_sdk():
+    """Test that ACPAgent raises ImportError when SDK is not available."""
+    from openhands.sdk.conversation.state import ConversationState
+
+    agent = ACPAgent(acp_command=["test"])
     state = Mock(spec=ConversationState)
 
-    with pytest.raises(NotImplementedError, match="ACPAgent does not yet support MCP"):
-        agent.init_state(state, on_event=Mock())
+    # Temporarily disable ACP availability to test error handling
+    import openhands.sdk.agent.acp_agent as acp_module
 
-
-@patch("subprocess.Popen")
-def test_acp_agent_start_server(mock_popen):
-    """Test that ACP server can be started."""
-    agent = ACPAgent(
-        acp_command=["python", "-m", "acp_server"],
-    )
-
-    mock_process = Mock()
-    mock_process.stdin = Mock()
-    mock_process.stdout = Mock()
-    mock_process.poll.return_value = None
-    mock_popen.return_value = mock_process
-
-    agent._start_acp_server("/tmp/workspace")
-
-    mock_popen.assert_called_once()
-    assert agent._process == mock_process
+    original_available = acp_module._ACP_AVAILABLE
+    try:
+        acp_module._ACP_AVAILABLE = False
+        with pytest.raises(
+            ImportError, match="agent-client-protocol package is required"
+        ):
+            agent.init_state(state, on_event=Mock())
+    finally:
+        acp_module._ACP_AVAILABLE = original_available
