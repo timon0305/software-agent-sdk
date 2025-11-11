@@ -73,7 +73,7 @@ from openhands.sdk.llm.mixins.non_native_fc import NonNativeToolCallingMixin
 from openhands.sdk.llm.options.chat_options import select_chat_options
 from openhands.sdk.llm.options.responses_options import select_responses_options
 from openhands.sdk.llm.utils.metrics import Metrics, MetricsSnapshot
-from openhands.sdk.llm.utils.model_features import get_features
+from openhands.sdk.llm.utils.model_features import get_default_temperature, get_features
 from openhands.sdk.llm.utils.retry_mixin import RetryMixin
 from openhands.sdk.llm.utils.telemetry import Telemetry
 from openhands.sdk.logger import ENV_LOG_DIR, get_logger
@@ -123,14 +123,14 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
     # Config fields
     # =========================================================================
     model: str = Field(default="claude-sonnet-4-20250514", description="Model name.")
-    api_key: SecretStr | None = Field(default=None, description="API key.")
+    api_key: str | SecretStr | None = Field(default=None, description="API key.")
     base_url: str | None = Field(default=None, description="Custom base URL.")
     api_version: str | None = Field(
         default=None, description="API version (e.g., Azure)."
     )
 
-    aws_access_key_id: SecretStr | None = Field(default=None)
-    aws_secret_access_key: SecretStr | None = Field(default=None)
+    aws_access_key_id: str | SecretStr | None = Field(default=None)
+    aws_secret_access_key: str | SecretStr | None = Field(default=None)
     aws_region_name: str | None = Field(default=None)
 
     openrouter_site_url: str = Field(default="https://docs.all-hands.dev/")
@@ -149,7 +149,14 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         description="Approx max chars in each event/content sent to the LLM.",
     )
 
-    temperature: float | None = Field(default=0.0, ge=0)
+    temperature: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Sampling temperature for response generation. "
+            "Defaults to 0 for most models and provider default for reasoning models."
+        ),
+    )
     top_p: float | None = Field(default=1.0, ge=0, le=1)
     top_k: float | None = Field(default=None, ge=0)
 
@@ -213,10 +220,16 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         description="Whether to use native tool calling.",
     )
     reasoning_effort: Literal["low", "medium", "high", "none"] | None = Field(
-        default=None,
+        default="high",
         description="The effort to put into reasoning. "
         "This is a string that can be one of 'low', 'medium', 'high', or 'none'. "
         "Can apply to all reasoning models.",
+    )
+    reasoning_summary: Literal["auto", "concise", "detailed"] | None = Field(
+        default=None,
+        description="The level of detail for reasoning summaries. "
+        "This is a string that can be one of 'auto', 'concise', or 'detailed'. "
+        "Requires verified OpenAI organization. Only sent when explicitly set.",
     )
     enable_encrypted_reasoning: bool = Field(
         default=False,
@@ -274,6 +287,9 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         "api_key",
         "aws_access_key_id",
         "aws_secret_access_key",
+        # Dynamic runtime metadata for telemetry/routing that can differ across sessions
+        # and should not cause resume-time diffs. Always prefer the runtime value.
+        "litellm_extra_body",
     )
 
     # Runtime-only private attrs
@@ -290,7 +306,7 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
     # =========================================================================
     @field_validator("api_key", "aws_access_key_id", "aws_secret_access_key")
     @classmethod
-    def _validate_secrets(cls, v: SecretStr | None, info):
+    def _validate_secrets(cls, v: str | SecretStr | None, info) -> SecretStr | None:
         return validate_secret(v, info)
 
     @model_validator(mode="before")
@@ -311,14 +327,6 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         model_val = d.get("model")
         if not model_val:
             raise ValueError("model must be specified in LLM")
-
-        # default reasoning_effort unless Gemini 2.5
-        # (we keep consistent with old behavior)
-        excluded_models = ["gemini-2.5-pro", "claude-sonnet-4-5", "claude-haiku-4-5"]
-        if d.get("reasoning_effort") is None and not any(
-            model in model_val for model in excluded_models
-        ):
-            d["reasoning_effort"] = "high"
 
         # Azure default version
         if model_val.startswith("azure") and not d.get("api_version"):
@@ -344,8 +352,10 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         if self.openrouter_app_name:
             os.environ["OR_APP_NAME"] = self.openrouter_app_name
         if self.aws_access_key_id:
+            assert isinstance(self.aws_access_key_id, SecretStr)
             os.environ["AWS_ACCESS_KEY_ID"] = self.aws_access_key_id.get_secret_value()
         if self.aws_secret_access_key:
+            assert isinstance(self.aws_secret_access_key, SecretStr)
             os.environ["AWS_SECRET_ACCESS_KEY"] = (
                 self.aws_secret_access_key.get_secret_value()
             )
@@ -372,9 +382,13 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         # Capabilities + model info
         self._init_model_info_and_caps()
 
+        if self.temperature is None:
+            self.temperature = get_default_temperature(self.model)
+
         logger.debug(
             f"LLM ready: model={self.model} base_url={self.base_url} "
-            f"reasoning_effort={self.reasoning_effort}"
+            f"reasoning_effort={self.reasoning_effort} "
+            f"temperature={self.temperature}"
         )
         return self
 
@@ -528,7 +542,9 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
             # 6) telemetry
             self._telemetry.on_response(resp, raw_resp=raw_resp)
 
-            # Ensure at least one choice
+            # Ensure at least one choice.
+            # Gemini sometimes returns empty choices; we raise LLMNoResponseError here
+            # inside the retry boundary so it is retried.
             if not resp.get("choices") or len(resp["choices"]) < 1:
                 raise LLMNoResponseError(
                     "Response choices is less than 1. Response: " + str(resp)
@@ -635,14 +651,18 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                     typed_input: ResponseInputParam | str = (
                         cast(ResponseInputParam, input_items) if input_items else ""
                     )
+                    # Extract api_key value with type assertion for type checker
+                    api_key_value: str | None = None
+                    if self.api_key:
+                        assert isinstance(self.api_key, SecretStr)
+                        api_key_value = self.api_key.get_secret_value()
+
                     ret = litellm_responses(
                         model=self.model,
                         input=typed_input,
                         instructions=instructions,
                         tools=resp_tools,
-                        api_key=self.api_key.get_secret_value()
-                        if self.api_key
-                        else None,
+                        api_key=api_key_value,
                         api_base=self.base_url,
                         api_version=self.api_version,
                         timeout=self.timeout,
@@ -710,10 +730,16 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                     "ignore",
                     category=UserWarning,
                 )
+                # Extract api_key value with type assertion for type checker
+                api_key_value: str | None = None
+                if self.api_key:
+                    assert isinstance(self.api_key, SecretStr)
+                    api_key_value = self.api_key.get_secret_value()
+
                 # Some providers need renames handled in _normalize_call_kwargs.
                 ret = litellm_completion(
                     model=self.model,
-                    api_key=self.api_key.get_secret_value() if self.api_key else None,
+                    api_key=api_key_value,
                     api_base=self.base_url,
                     api_version=self.api_version,
                     timeout=self.timeout,
@@ -757,7 +783,11 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                 base_url = "http://" + base_url
             try:
                 headers = {}
-                api_key = self.api_key.get_secret_value() if self.api_key else ""
+                # Extract api_key value with type assertion for type checker
+                api_key = ""
+                if self.api_key:
+                    assert isinstance(self.api_key, SecretStr)
+                    api_key = self.api_key.get_secret_value()
                 if api_key:
                     headers["Authorization"] = f"Bearer {api_key}"
 
@@ -807,7 +837,12 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         if self.max_output_tokens is None:
             if any(
                 m in self.model
-                for m in ["claude-3-7-sonnet", "claude-3.7-sonnet", "claude-sonnet-4"]
+                for m in [
+                    "claude-3-7-sonnet",
+                    "claude-3.7-sonnet",
+                    "claude-sonnet-4",
+                    "kimi-k2-thinking",
+                ]
             ):
                 self.max_output_tokens = (
                     64000  # practical cap (litellm may allow 128k with header)
@@ -821,6 +856,16 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                     self.max_output_tokens = self._model_info.get("max_output_tokens")
                 elif isinstance(self._model_info.get("max_tokens"), int):
                     self.max_output_tokens = self._model_info.get("max_tokens")
+
+        if "o3" in self.model:
+            o3_limit = 100000
+            if self.max_output_tokens is None or self.max_output_tokens > o3_limit:
+                self.max_output_tokens = o3_limit
+                logger.debug(
+                    "Clamping max_output_tokens to %s for %s",
+                    self.max_output_tokens,
+                    self.model,
+                )
 
     def vision_is_active(self) -> bool:
         with warnings.catch_warnings():
@@ -903,9 +948,9 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
             message.cache_enabled = self.is_caching_prompt_active()
             message.vision_enabled = self.vision_is_active()
             message.function_calling_enabled = self.native_tool_calling
-            message.force_string_serializer = get_features(
-                self.model
-            ).force_string_serializer
+            model_features = get_features(self.model)
+            message.force_string_serializer = model_features.force_string_serializer
+            message.send_reasoning_content = model_features.send_reasoning_content
 
         formatted_messages = [message.to_chat_dict() for message in messages]
 

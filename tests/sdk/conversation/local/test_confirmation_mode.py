@@ -552,7 +552,8 @@ class TestConfirmationMode:
             e for e in self.conversation.state.events if isinstance(e, ObservationEvent)
         ]
         assert len(obs_events) == 1
-        assert obs_events[0].observation.message == "Task completed successfully!"  # type: ignore[attr-defined]
+        # FinishObservation should contain the finish message in content
+        assert obs_events[0].observation.text == "Task completed successfully!"
 
     def test_think_and_finish_action_skips_confirmation_entirely(self):
         """First step: ThinkAction (skips confirmation). Second step: FinishAction."""
@@ -594,13 +595,13 @@ class TestConfirmationMode:
         ]
         assert len(obs_events) == 2
 
-        # 1) ThinkAction observation
+        # 1) ThinkAction observation - should contain the standard message
         assert hasattr(obs_events[0].observation, "content")
-        assert obs_events[0].observation.content == "Your thought has been logged."  # type: ignore[attr-defined]
+        assert obs_events[0].observation.text == "Your thought has been logged."
 
-        # 2) FinishAction observation
-        assert hasattr(obs_events[1].observation, "message")
-        assert obs_events[1].observation.message == "Analysis complete"  # type: ignore[attr-defined]
+        # 2) FinishAction observation - should contain the finish message
+        assert hasattr(obs_events[1].observation, "content")
+        assert obs_events[1].observation.text == "Analysis complete"
 
     def test_pause_during_confirmation_preserves_waiting_status(self):
         """Test that pausing during WAITING_FOR_CONFIRMATION preserves the status.
@@ -657,31 +658,31 @@ class TestConfirmationMode:
     def test_is_confirmation_mode_active_property(self):
         """Test the is_confirmation_mode_active property behavior."""
         # Initially, no security analyzer and NeverConfirm policy
-        assert self.conversation.state.agent.security_analyzer is None
+        assert self.conversation.state.security_analyzer is None
         assert self.conversation.state.confirmation_policy == NeverConfirm()
         assert not self.conversation.confirmation_policy_active
         assert not self.conversation.is_confirmation_mode_active
 
         # Set confirmation policy to AlwaysConfirm, but still no security analyzer
         self.conversation.set_confirmation_policy(AlwaysConfirm())
-        assert self.conversation.state.agent.security_analyzer is None
+        assert self.conversation.state.security_analyzer is None
         assert self.conversation.state.confirmation_policy == AlwaysConfirm()
         assert self.conversation.confirmation_policy_active
         # Still False because no security analyzer
         assert not self.conversation.is_confirmation_mode_active
 
-        # Create agent with security analyzer
+        # Create agent and set security analyzer on conversation state
         from openhands.sdk.security.llm_analyzer import LLMSecurityAnalyzer
 
-        agent_with_analyzer = Agent(
+        agent = Agent(
             llm=self.llm,
             tools=[Tool(name="test_tool")],
-            security_analyzer=LLMSecurityAnalyzer(),
         )
-        conversation_with_analyzer = Conversation(agent=agent_with_analyzer)
+        conversation_with_analyzer = Conversation(agent=agent)
+        conversation_with_analyzer.set_security_analyzer(LLMSecurityAnalyzer())
 
         # Initially with security analyzer but NeverConfirm policy
-        assert conversation_with_analyzer.state.agent.security_analyzer is not None
+        assert conversation_with_analyzer.state.security_analyzer is not None
         assert conversation_with_analyzer.state.confirmation_policy == NeverConfirm()
         assert not conversation_with_analyzer.confirmation_policy_active
         # False because policy is NeverConfirm
@@ -689,7 +690,7 @@ class TestConfirmationMode:
 
         # Set confirmation policy to AlwaysConfirm with security analyzer
         conversation_with_analyzer.set_confirmation_policy(AlwaysConfirm())
-        assert conversation_with_analyzer.state.agent.security_analyzer is not None
+        assert conversation_with_analyzer.state.security_analyzer is not None
         assert conversation_with_analyzer.state.confirmation_policy == AlwaysConfirm()
         assert conversation_with_analyzer.confirmation_policy_active
         # True because both conditions are met

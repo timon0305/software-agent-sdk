@@ -23,6 +23,7 @@ class ModelFeatures:
     supports_stop_words: bool
     supports_responses_api: bool
     force_string_serializer: bool
+    send_reasoning_content: bool
 
 
 # Pattern tables capturing current behavior. Keep patterns lowercase.
@@ -69,8 +70,9 @@ PROMPT_CACHE_PATTERNS: list[str] = [
 ]
 
 SUPPORTS_STOP_WORDS_FALSE_PATTERNS: list[str] = [
-    # o1 family doesn't support stop words
+    # o-series families don't support stop words
     "o1",
+    "o3",
     # grok-4 specific model name (basename)
     "grok-4-0709",
     "grok-code-fast-1",
@@ -98,6 +100,12 @@ FORCE_STRING_SERIALIZER_PATTERNS: list[str] = [
     "groq/kimi-k2-instruct",  # explicit provider-prefixed IDs
 ]
 
+# Models that we should send full reasoning content
+# in the message input
+SEND_REASONING_CONTENT_PATTERNS: list[str] = [
+    "kimi-k2-thinking",
+]
+
 
 def get_features(model: str) -> ModelFeatures:
     """Get model features."""
@@ -110,4 +118,23 @@ def get_features(model: str) -> ModelFeatures:
         ),
         supports_responses_api=model_matches(model, RESPONSES_API_PATTERNS),
         force_string_serializer=model_matches(model, FORCE_STRING_SERIALIZER_PATTERNS),
+        send_reasoning_content=model_matches(model, SEND_REASONING_CONTENT_PATTERNS),
     )
+
+
+# Default temperature mapping.
+# Each entry: (pattern, default_temperature)
+DEFAULT_TEMPERATURE_PATTERNS: list[tuple[str, float]] = [
+    ("kimi-k2-thinking", 1.0),
+]
+
+
+def get_default_temperature(model: str) -> float:
+    """Return the default temperature for a given model pattern.
+
+    Uses case-insensitive substring matching via model_matches.
+    """
+    for pattern, value in DEFAULT_TEMPERATURE_PATTERNS:
+        if model_matches(model, [pattern]):
+            return value
+    return 0.0

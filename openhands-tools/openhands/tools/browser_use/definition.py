@@ -24,40 +24,59 @@ if TYPE_CHECKING:
 # Maximum output size for browser observations
 MAX_BROWSER_OUTPUT_SIZE = 50000
 
+# Mapping of base64 prefixes to MIME types for image detection
+BASE64_IMAGE_PREFIXES = {
+    "/9j/": "image/jpeg",
+    "iVBORw0KGgo": "image/png",
+    "R0lGODlh": "image/gif",
+    "UklGR": "image/webp",
+}
+
+
+def detect_image_mime_type(base64_data: str) -> str:
+    """Detect MIME type from base64-encoded image data.
+
+    Args:
+        base64_data: Base64-encoded image data
+
+    Returns:
+        Detected MIME type, defaults to "image/png" if not detected
+    """
+    for prefix, mime_type in BASE64_IMAGE_PREFIXES.items():
+        if base64_data.startswith(prefix):
+            return mime_type
+    return "image/png"
+
 
 class BrowserObservation(Observation):
     """Base observation for browser operations."""
 
-    output: str = Field(description="The output message from the browser operation")
-    error: str | None = Field(default=None, description="Error message if any")
     screenshot_data: str | None = Field(
         default=None, description="Base64 screenshot data if available"
     )
 
     @property
     def to_llm_content(self) -> Sequence[TextContent | ImageContent]:
-        if self.error:
-            return [TextContent(text=f"Error: {self.error}")]
+        llm_content: list[TextContent | ImageContent] = []
 
-        content: list[TextContent | ImageContent] = [
-            TextContent(text=maybe_truncate(self.output, MAX_BROWSER_OUTPUT_SIZE))
-        ]
+        # If is_error is true, prepend error message
+        if self.is_error:
+            llm_content.append(TextContent(text=self.ERROR_MESSAGE_HEADER))
+
+        # Get text content and truncate if needed
+        content_text = self.text
+        if content_text:
+            llm_content.append(
+                TextContent(text=maybe_truncate(content_text, MAX_BROWSER_OUTPUT_SIZE))
+            )
 
         if self.screenshot_data:
-            mime_type = "image/png"
-            if self.screenshot_data.startswith("/9j/"):
-                mime_type = "image/jpeg"
-            elif self.screenshot_data.startswith("iVBORw0KGgo"):
-                mime_type = "image/png"
-            elif self.screenshot_data.startswith("R0lGODlh"):
-                mime_type = "image/gif"
-            elif self.screenshot_data.startswith("UklGR"):
-                mime_type = "image/webp"
+            mime_type = detect_image_mime_type(self.screenshot_data)
             # Convert base64 to data URL format for ImageContent
             data_url = f"data:{mime_type};base64,{self.screenshot_data}"
-            content.append(ImageContent(image_urls=[data_url]))
+            llm_content.append(ImageContent(image_urls=[data_url]))
 
-        return content
+        return llm_content
 
 
 # ============================================

@@ -18,8 +18,8 @@ from openhands.sdk.conversation.secret_registry import SecretValue
 from openhands.sdk.conversation.state import ConversationExecutionStatus
 from openhands.sdk.conversation.types import ConversationCallbackType, ConversationID
 from openhands.sdk.conversation.visualizer import (
-    ConversationVisualizer,
-    create_default_visualizer,
+    ConversationVisualizerBase,
+    DefaultConversationVisualizer,
 )
 from openhands.sdk.event.base import Event
 from openhands.sdk.event.conversation_state import (
@@ -28,12 +28,8 @@ from openhands.sdk.event.conversation_state import (
 )
 from openhands.sdk.llm import LLM, Message, TextContent
 from openhands.sdk.logger import get_logger
-from openhands.sdk.observability.laminar import (
-    end_active_span,
-    observe,
-    should_enable_observability,
-    start_active_span,
-)
+from openhands.sdk.observability.laminar import observe
+from openhands.sdk.security.analyzer import SecurityAnalyzerBase
 from openhands.sdk.security.confirmation_policy import (
     ConfirmationPolicyBase,
 )
@@ -349,6 +345,16 @@ class RemoteState(ConversationStateProtocol):
         return ConfirmationPolicyBase.model_validate(policy_data)
 
     @property
+    def security_analyzer(self) -> SecurityAnalyzerBase | None:
+        """The security analyzer."""
+        info = self._get_conversation_info()
+        analyzer_data = info.get("security_analyzer")
+        if analyzer_data:
+            return SecurityAnalyzerBase.model_validate(analyzer_data)
+
+        return None
+
+    @property
     def activated_knowledge_skills(self) -> list[str]:
         """List of activated knowledge skills."""
         info = self._get_conversation_info()
@@ -383,6 +389,13 @@ class RemoteState(ConversationStateProtocol):
             )
         return persistence_dir
 
+    @property
+    def stats(self) -> ConversationStats:
+        """Get conversation stats (fetched from remote)."""
+        info = self._get_conversation_info()
+        stats_data = info.get("stats", {})
+        return ConversationStats.model_validate(stats_data)
+
     def model_dump(self, **_kwargs):
         """Get a dictionary representation of the remote state."""
         info = self._get_conversation_info()
@@ -403,7 +416,7 @@ class RemoteState(ConversationStateProtocol):
 class RemoteConversation(BaseConversation):
     _id: uuid.UUID
     _state: "RemoteState"
-    _visualizer: ConversationVisualizer | None
+    _visualizer: ConversationVisualizerBase | None
     _ws_client: "WebSocketCallbackClient | None"
     agent: AgentBase
     _callbacks: list[ConversationCallbackType]
@@ -419,8 +432,9 @@ class RemoteConversation(BaseConversation):
         callbacks: list[ConversationCallbackType] | None = None,
         max_iteration_per_run: int = 500,
         stuck_detection: bool = True,
-        visualize: bool = False,
-        name_for_visualization: str | None = None,
+        visualizer: (
+            type[ConversationVisualizerBase] | ConversationVisualizerBase | None
+        ) = DefaultConversationVisualizer,
         secrets: Mapping[str, SecretValue] | None = None,
         **_: object,
     ) -> None:
@@ -433,11 +447,14 @@ class RemoteConversation(BaseConversation):
             callbacks: Optional callbacks to receive events (not yet streamed)
             max_iteration_per_run: Max iterations configured on server
             stuck_detection: Whether to enable stuck detection on server
-            visualize: Whether to enable the default visualizer callback
-            name_for_visualization: Optional name to prefix in panel titles to identify
-                                  which agent/conversation is speaking.
+            visualizer: Visualization configuration. Can be:
+                       - ConversationVisualizerBase subclass: Class to instantiate
+                         (default: ConversationVisualizer)
+                       - ConversationVisualizerBase instance: Use custom visualizer
+                       - None: No visualization
             secrets: Optional secrets to initialize the conversation with
         """
+        super().__init__()  # Initialize base class with span tracking
         self.agent = agent
         self._callbacks = callbacks or []
         self.max_iteration_per_run = max_iteration_per_run
@@ -485,14 +502,23 @@ class RemoteConversation(BaseConversation):
         state_update_callback = self._state.create_state_update_callback()
         self._callbacks.append(state_update_callback)
 
-        # Add default visualizer callback if requested
-        if visualize:
-            self._visualizer = create_default_visualizer(
-                name_for_visualization=name_for_visualization,
-            )
-            if self._visualizer is not None:
-                self._callbacks.append(self._visualizer.on_event)
+        # Handle visualization configuration
+        if isinstance(visualizer, ConversationVisualizerBase):
+            # Use custom visualizer instance
+            self._visualizer = visualizer
+            # Initialize the visualizer with conversation state
+            self._visualizer.initialize(self._state)
+            self._callbacks.append(self._visualizer.on_event)
+        elif isinstance(visualizer, type) and issubclass(
+            visualizer, ConversationVisualizerBase
+        ):
+            # Instantiate the visualizer class with appropriate parameters
+            self._visualizer = visualizer()
+            # Initialize with state
+            self._visualizer.initialize(self._state)
+            self._callbacks.append(self._visualizer.on_event)
         else:
+            # No visualization (visualizer is None)
             self._visualizer = None
 
         # Compose all callbacks into a single callback
@@ -513,8 +539,7 @@ class RemoteConversation(BaseConversation):
             secret_values: dict[str, SecretValue] = {k: v for k, v in secrets.items()}
             self.update_secrets(secret_values)
 
-        if should_enable_observability():
-            start_active_span("conversation", session_id=str(self._id))
+        self._start_observability_span(str(self._id))
 
     @property
     def id(self) -> ConversationID:
@@ -526,11 +551,8 @@ class RemoteConversation(BaseConversation):
         return self._state
 
     @property
-    def conversation_stats(self) -> ConversationStats:
-        """Get conversation stats from remote server."""
-        info = self._state._get_conversation_info()
-        stats_data = info.get("conversation_stats", {})
-        return ConversationStats.model_validate(stats_data)
+    def conversation_stats(self):
+        return self._state.stats
 
     @property
     def stuck_detector(self):
@@ -583,6 +605,16 @@ class RemoteConversation(BaseConversation):
             self._client,
             "POST",
             f"/api/conversations/{self._id}/confirmation_policy",
+            json=payload,
+        )
+
+    def set_security_analyzer(self, analyzer: SecurityAnalyzerBase | None) -> None:
+        """Set the security analyzer for the remote conversation."""
+        payload = {"security_analyzer": analyzer.model_dump() if analyzer else analyzer}
+        _send_request(
+            self._client,
+            "POST",
+            f"/api/conversations/{self._id}/security_analyzer",
             json=payload,
         )
 
@@ -645,6 +677,12 @@ class RemoteConversation(BaseConversation):
         return data["title"]
 
     def close(self) -> None:
+        """Close the conversation and clean up resources.
+
+        Note: We don't close self._client here because it's shared with the workspace.
+        The workspace owns the client and will close it during its own cleanup.
+        Closing it here would prevent the workspace from making cleanup API calls.
+        """
         try:
             # Stop WebSocket client if it exists
             if self._ws_client:
@@ -653,12 +691,7 @@ class RemoteConversation(BaseConversation):
         except Exception:
             pass
 
-        end_active_span()
-
-        try:
-            self._client.close()
-        except Exception:
-            pass
+        self._end_observability_span()
 
     def __del__(self) -> None:
         try:
