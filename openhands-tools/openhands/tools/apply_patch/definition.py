@@ -83,7 +83,15 @@ class ApplyPatchExecutor(ToolExecutor[ApplyPatchAction, ApplyPatchObservation]):
             msg, fuzz, commit = process_patch(
                 action.patch_text, open_file, write_file, remove_file
             )
-            return ApplyPatchObservation(message=msg, fuzz=fuzz, commit=commit)
+            # Include a human-readable summary in content so Responses API sees
+            # a function_call_output payload paired with the function_call.
+            obs = ApplyPatchObservation(message=msg, fuzz=fuzz, commit=commit)
+            if msg:
+                # Use Observation.from_text to populate content field correctly
+                obs = ApplyPatchObservation.from_text(
+                    text=msg, message=msg, fuzz=fuzz, commit=commit, is_error=False
+                )
+            return obs
         except DiffError as e:
             return ApplyPatchObservation.from_text(text=str(e), is_error=True)
 
