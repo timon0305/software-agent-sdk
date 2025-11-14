@@ -463,31 +463,33 @@ class Message(BaseModel):
                         "content": content_items,
                     }
                 )
-            # Include prior turn's reasoning item exactly as received (if any).
-            # Ensure it's not the last item in the input; it must be followed by
-            # at least one other item (e.g., message or function_call).
+            # Include prior turn's reasoning item exactly as received (if any)
             if self.responses_reasoning_item is not None:
                 ri = self.responses_reasoning_item
+                # Only send back if we have an id; required by the param schema
                 if ri.id is not None:
                     reasoning_item: dict[str, Any] = {
                         "type": "reasoning",
                         "id": ri.id,
+                        # Always include summary exactly as received (can be empty)
                         "summary": [
                             {"type": "summary_text", "text": s}
                             for s in (ri.summary or [])
                         ],
                     }
+                    # Optional content passthrough
                     if ri.content:
                         reasoning_item["content"] = [
                             {"type": "reasoning_text", "text": t} for t in ri.content
                         ]
+                    # Optional fields as received
                     if ri.encrypted_content:
                         reasoning_item["encrypted_content"] = ri.encrypted_content
                     if ri.status:
                         reasoning_item["status"] = ri.status
                     items.append(reasoning_item)
-            # Emit assistant function_call items; the client will also send
-            # the corresponding function_call_output items in the same request.
+            # Emit assistant tool calls so subsequent function_call_output
+            # can match call_id
             if self.tool_calls:
                 for tc in self.tool_calls:
                     items.append(tc.to_responses_dict())
