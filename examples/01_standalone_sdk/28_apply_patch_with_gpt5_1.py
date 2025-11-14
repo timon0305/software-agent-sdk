@@ -53,15 +53,12 @@ llm = LLM(
 # They self-register into the global registry on import
 _ = (TerminalTool, TaskTrackerTool, ApplyPatchTool)
 
-# Add our new ApplyPatchTool by name
-additional_tools = [Tool(name=ApplyPatchTool.name)]
-
 agent = Agent(
     llm=llm,
     tools=[
         Tool(name="terminal"),
         Tool(name="task_tracker"),
-        *additional_tools,
+        Tool(name="apply_patch"),
     ],
     system_prompt_kwargs={"cli_mode": True},
 )
