@@ -43,9 +43,10 @@ llm = LLM(
     api_key=SecretStr(api_key),
     native_tool_calling=True,  # enable native tool calling (Responses API)
     reasoning_summary=None,  # avoid OpenAI org verification requirement
+    log_completions=True,  # enable telemetry to log input/output payloads
 )
 
-# Ensure default tools are registered (terminal/file_editor/task_tracker)
+# Ensure default tools are registered (terminal/task_tracker)
 register_default_tools(enable_browser=False)
 
 # Add our new ApplyPatchTool by name
@@ -54,9 +55,8 @@ additional_tools = [Tool(name=ApplyPatchTool.name)]
 agent = Agent(
     llm=llm,
     tools=[
-        # Keep the standard console-friendly tools, plus our ApplyPatch
+        # Keep terminal + task tracker, and our ApplyPatch (replace FileEditor)
         Tool(name="terminal"),  # TerminalTool.name resolves to "terminal"
-        Tool(name="file_editor"),  # FileEditorTool
         Tool(name="task_tracker"),  # TaskTrackerTool
         *additional_tools,
     ],

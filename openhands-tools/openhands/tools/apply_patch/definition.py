@@ -15,6 +15,7 @@ from openhands.sdk.tool import (
     ToolExecutor,
     register_tool,
 )
+from openhands.sdk.tool.tool import FunctionToolParam
 
 from .core import Commit, DiffError, process_patch
 
@@ -23,12 +24,18 @@ if TYPE_CHECKING:
     from openhands.sdk.conversation.state import ConversationState
 
 
+from pydantic import AliasChoices
+
+
 class ApplyPatchAction(Action):
+    # Accept both OpenAI server-known param name 'patch' and local 'patch_text'
     patch_text: str = Field(
+        validation_alias=AliasChoices("patch", "patch_text"),
+        serialization_alias="patch",
         description=(
             "Patch content following the '*** Begin Patch' ... '*** End Patch' "
             "format as described in OpenAI GPT-5.1 prompting guide."
-        )
+        ),
     )
 
 
@@ -106,6 +113,16 @@ class ApplyPatchTool(ToolDefinition[ApplyPatchAction, ApplyPatchObservation]):
                 executor=executor,
             )
         ]
+
+    # For OpenAI Responses API with GPT-5.1 models, the tool is server-known.
+    # Return a minimal function spec so the provider wires its own definition.
+    def to_responses_tool(
+        self,
+        add_security_risk_prediction: bool = False,  # noqa: ARG002 - signature match
+        action_type: type | None = None,  # noqa: ARG002 - signature match
+    ) -> FunctionToolParam:  # type: ignore[override]
+        # Minimal spec: name only; let OpenAI server resolve params/description
+        return {"type": "function", "name": self.name}  # type: ignore[return-value]
 
 
 register_tool(ApplyPatchTool.name, ApplyPatchTool)
