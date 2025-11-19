@@ -109,7 +109,7 @@ jobs:
                   # Function to sanitize @OpenHands mentions using the SDK utility
                   sanitize_comment() {
                       local text="$1"
-                      echo "$text" | uv run python -c "from openhands.sdk.utils.github import sanitize_openhands_mentions; import sys; print(sanitize_openhands_mentions(sys.stdin.read()), end='')"
+                      printf "%s" "$text" | uv run python -c "from openhands.sdk.utils.github import sanitize_openhands_mentions; import sys; print(sanitize_openhands_mentions(sys.stdin.read()), end='')"
                   }
 
                   # Function to update PR comment
