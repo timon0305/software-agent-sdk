@@ -6,7 +6,9 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from openhands.sdk.conversation.visualizer import ConversationVisualizer
+from openhands.sdk.conversation.visualizer.default import (
+    DefaultConversationVisualizer,
+)
 from openhands.sdk.event import ActionEvent, MessageEvent, StreamingDeltaEvent
 from openhands.sdk.event.base import Event
 from openhands.sdk.llm.llm import RESPONSES_COMPLETION_EVENT_TYPES
@@ -14,7 +16,6 @@ from openhands.sdk.llm.streaming import StreamPartKind
 
 
 if TYPE_CHECKING:
-    from openhands.sdk.conversation.conversation_stats import ConversationStats
     from openhands.sdk.llm.streaming import LLMStreamChunk
 
 
@@ -44,7 +45,6 @@ _SECTION_CONFIG: dict[str, tuple[str, str]] = {
     "reasoning": ("Reasoning", _THOUGHT_COLOR),
     "assistant": ("Assistant", _ACTION_COLOR),
     "function_arguments": ("Function Arguments", _ACTION_COLOR),
-    "tool_output": ("Tool Output", _ACTION_COLOR),
     "refusal": ("Refusal", _ERROR_COLOR),
 }
 
@@ -64,7 +64,6 @@ _SECTION_ORDER = [
     "reasoning",
     "assistant",
     "function_arguments",
-    "tool_output",
     "refusal",
 ]
 
@@ -172,7 +171,7 @@ class _StreamSession:
         )
 
 
-class StreamingConversationVisualizer(ConversationVisualizer):
+class StreamingConversationVisualizer(DefaultConversationVisualizer):
     """Streaming-focused visualizer that renders deltas in-place."""
 
     requires_streaming: bool = True
@@ -181,19 +180,17 @@ class StreamingConversationVisualizer(ConversationVisualizer):
         self,
         highlight_regex: dict[str, str] | None = None,
         skip_user_messages: bool = False,
-        conversation_stats: "ConversationStats | None" = None,
     ) -> None:
         super().__init__(
             highlight_regex=highlight_regex,
             skip_user_messages=skip_user_messages,
-            conversation_stats=conversation_stats,
         )
         self._use_live: bool = self._console.is_terminal
         self._stream_sessions: dict[tuple[str, int, str], _StreamSession] = {}
 
     def on_event(self, event: Event) -> None:
         if isinstance(event, StreamingDeltaEvent):
-            self._handle_stream_chunk(event.stream_chunk, persist_on_finish=True)
+            self._handle_stream_chunk(event.stream_chunk)
             return
 
         if self._should_skip_event(event):
@@ -201,17 +198,13 @@ class StreamingConversationVisualizer(ConversationVisualizer):
 
         super().on_event(event)
 
-    def _handle_stream_chunk(
-        self, stream_chunk: "LLMStreamChunk", *, persist_on_finish: bool
-    ) -> None:
+    def _handle_stream_chunk(self, stream_chunk: "LLMStreamChunk") -> None:
         if stream_chunk.part_kind == "status":
             if (
                 stream_chunk.type in RESPONSES_COMPLETION_EVENT_TYPES
                 or stream_chunk.is_final
             ):
-                self._finish_stream_sessions(
-                    stream_chunk.response_id, persist=persist_on_finish
-                )
+                self._finish_stream_sessions(stream_chunk.response_id, persist=True)
             return
 
         session_type = self._session_type_for_part(stream_chunk.part_kind)
@@ -236,18 +229,12 @@ class StreamingConversationVisualizer(ConversationVisualizer):
         )
 
         if stream_chunk.is_final:
-            if persist_on_finish:
-                self._finish_session_by_key(key, persist=True)
-            else:
-                if not self._use_live:
-                    self._finish_session_by_key(key, persist=False)
-                elif stream_chunk.response_id is None:
-                    self._finish_session_by_key(key, persist=False)
+            self._finish_session_by_key(key, persist=True)
 
     def _session_type_for_part(self, part_kind: StreamPartKind) -> str | None:
         if part_kind in {"assistant_message", "reasoning_summary", "refusal"}:
             return "message"
-        if part_kind in {"function_call_arguments", "tool_call_output"}:
+        if part_kind in {"function_call_arguments"}:
             return "action"
         return None
 
@@ -258,8 +245,6 @@ class StreamingConversationVisualizer(ConversationVisualizer):
             return "reasoning"
         if part_kind == "function_call_arguments":
             return "function_arguments"
-        if part_kind == "tool_call_output":
-            return "tool_output"
         if part_kind == "refusal":
             return "refusal"
         return "assistant"
@@ -313,7 +298,7 @@ class StreamingConversationVisualizer(ConversationVisualizer):
                 padding=_PANEL_PADDING,
                 expand=True,
             )
-        return super()._create_event_panel(event)
+        return None
 
     def _should_skip_event(self, event: Event) -> bool:
         if isinstance(event, MessageEvent) and event.source == "agent":
@@ -325,7 +310,6 @@ class StreamingConversationVisualizer(ConversationVisualizer):
 
 def create_streaming_visualizer(
     highlight_regex: dict[str, str] | None = None,
-    conversation_stats: "ConversationStats | None" = None,
     **kwargs,
 ) -> StreamingConversationVisualizer:
     """Create a streaming-aware visualizer instance."""
@@ -334,6 +318,5 @@ def create_streaming_visualizer(
         highlight_regex=DEFAULT_HIGHLIGHT_REGEX
         if highlight_regex is None
         else highlight_regex,
-        conversation_stats=conversation_stats,
         **kwargs,
     )

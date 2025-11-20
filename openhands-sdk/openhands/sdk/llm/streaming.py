@@ -9,7 +9,6 @@ StreamPartKind = Literal[
     "assistant_message",
     "reasoning_summary",
     "function_call_arguments",
-    "tool_call_output",
     "refusal",
     "system",
     "status",

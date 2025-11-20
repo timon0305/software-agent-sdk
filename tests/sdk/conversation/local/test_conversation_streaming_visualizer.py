@@ -3,10 +3,12 @@ from __future__ import annotations
 from litellm.responses.main import mock_responses_api_response
 from rich.console import Console
 
+from openhands.sdk import Conversation
+from openhands.sdk.agent import Agent
 from openhands.sdk.conversation.streaming_visualizer import (
     StreamingConversationVisualizer,
 )
-from openhands.sdk.event import StreamingDeltaEvent
+from openhands.sdk.event import MessageEvent, StreamingDeltaEvent
 from openhands.sdk.llm import LLM, LLMResponse, LLMStreamChunk
 from openhands.sdk.llm.message import Message, TextContent
 from openhands.sdk.llm.utils.metrics import MetricsSnapshot
@@ -86,6 +88,65 @@ class FakeStreamingLLM(LLM):
         if self._telemetry:
             self._telemetry.on_response(raw_response)
         return LLMResponse(message=message, metrics=snapshot, raw_response=raw_response)
+
+
+def test_streaming_events_persist_and_dispatch(tmp_path):
+    llm = FakeStreamingLLM()
+    agent = Agent(llm=llm, tools=[])
+
+    tokens: list[LLMStreamChunk] = []
+    callback_events = []
+
+    def token_cb(event: LLMStreamChunk) -> None:
+        tokens.append(event)
+
+    def recorder(event) -> None:
+        callback_events.append(event)
+
+    conversation = Conversation(
+        agent=agent,
+        workspace=str(tmp_path),
+        callbacks=[recorder],
+        token_callbacks=[token_cb],
+    )
+
+    conversation.send_message("Say hello")
+    conversation.run()
+
+    stream_events = [
+        event
+        for event in conversation.state.events
+        if isinstance(event, StreamingDeltaEvent)
+    ]
+
+    assert len(stream_events) == len(llm._stream_events)
+    assert [evt.stream_chunk.type for evt in stream_events] == [
+        evt.type for evt in llm._stream_events
+    ]
+    assert [evt.stream_chunk.part_kind for evt in stream_events[:3]] == [
+        "assistant_message",
+        "assistant_message",
+        "assistant_message",
+    ]
+    assert stream_events[-2].stream_chunk.is_final is True
+    assert stream_events[-2].stream_chunk.part_kind == "assistant_message"
+    assert stream_events[-1].stream_chunk.part_kind == "status"
+
+    assert [evt.type for evt in tokens] == [evt.type for evt in llm._stream_events]
+
+    stream_indices = [
+        idx
+        for idx, event in enumerate(callback_events)
+        if isinstance(event, StreamingDeltaEvent)
+    ]
+    final_message_index = next(
+        idx
+        for idx, event in enumerate(callback_events)
+        if isinstance(event, MessageEvent) and event.source == "agent"
+    )
+
+    assert stream_indices  # streaming events received via callbacks
+    assert all(idx < final_message_index for idx in stream_indices)
 
 
 def test_visualizer_streaming_renders_incremental_text():
