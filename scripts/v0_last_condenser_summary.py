@@ -153,6 +153,9 @@ def load_events(
             if event_id is not None and end_id is not None and event_id <= end_id:
                 break
 
+        if not is_visible_event(event):
+            continue
+
         recent_events.append(event)
 
         if is_counted_event(event):
@@ -181,6 +184,9 @@ def load_events(
                     "error": f"Invalid JSON: {exc}",
                 }
 
+            if not is_visible_event(ev):
+                continue
+
             earliest_events.append(ev)
 
         # Merge earliest events and the recent tail while respecting max_size.
@@ -207,6 +213,24 @@ def load_events(
         events=recent_events,
         condensation_args=last_condensation_args,
     )
+
+
+def is_visible_event(event: dict[str, Any]) -> bool:
+    """Return True if this event should be included in returned history.
+
+    We hide the same meta events we exclude from budgets.
+    """
+
+    if (
+        event.get("source") == "environment"
+        and event.get("observation") == "agent_state_changed"
+    ):
+        return False
+
+    if event.get("source") == "user" and event.get("action") == "change_agent_state":
+        return False
+
+    return True
 
 
 def is_counted_event(event: dict[str, Any]) -> bool:
