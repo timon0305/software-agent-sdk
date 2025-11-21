@@ -34,17 +34,20 @@ From those it selects the *latest* condensation event, then:
 - Treats all events with ``id <= forgotten_events_end_id`` as summarized.
 - Returns everything after that as ``recent_events``.
 
-It then writes a plain-text bootstrap prompt you can paste directly into a V1
+It then writes a markdown bootstrap prompt you can paste directly into a V1
 agent as the first message. The prompt file is created in the **current
 working directory** as::
 
-    bootstrap_prompt_<conversation-id>.txt
+    bootstrap_prompt_<conversation-id>.md
 
 Where ``<conversation-id>`` is the name of the V0 conversation directory.
 
 Usage
 -----
-    python scripts/v0_last_condenser_summary.py /path/to/conversation
+Run this from the repository root:
+
+    python scripts/v0_last_condenser_summary.py \
+        /path/to/.conversations/<conversation-id>
 
 Where ``/path/to/conversation`` is a single conversation folder containing
 ``events/*.json`` (and optionally ``base_state.json``) as produced by V0.
