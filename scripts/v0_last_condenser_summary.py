@@ -2,9 +2,8 @@
 from a V0-style OpenHands conversation directory and generate a V1
 bootstrap prompt.
 
-This script doesn't know the full V0 event schema. It only
-looks for events whose JSON contains a ``forgotten_events_end_id`` field in
-``action.args`` (as produced by ``CondensationAction`` in V0).
+This script looks for V0 events whose JSON contains a ``forgotten_events_end_id``
+field in ``action.args`` (as produced by ``CondensationAction`` in V0).
 
 The serialized event is like:
 ```
