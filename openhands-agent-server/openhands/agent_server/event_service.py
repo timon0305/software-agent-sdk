@@ -365,6 +365,8 @@ class EventService:
                 state
             )
 
+            state.events.append(state_update_event)
+
             # Publish the state update event
             await self._pub_sub(state_update_event)
 
