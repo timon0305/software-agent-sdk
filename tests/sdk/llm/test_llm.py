@@ -522,6 +522,21 @@ def test_llm_force_string_serializer_auto_detect():
     assert len(formatted) == 1
     assert isinstance(formatted[0]["content"], str)
 
+    # Test with a model that doesn't require string serialization
+    llm_gpt = LLM(
+        model="gpt-4o",
+        api_key=SecretStr("test_key"),
+        usage_id="test-gpt",
+        caching_prompt=False,  # Disable caching
+        native_tool_calling=False,  # Disable tool calling
+        disable_vision=True,  # Disable vision to test simple string case
+    )
+    assert llm_gpt.force_string_serializer is None
+    # When formatting messages for GPT without special features, uses string by default
+    formatted_gpt = llm_gpt.format_messages_for_llm(messages)
+    assert len(formatted_gpt) == 1
+    assert isinstance(formatted_gpt[0]["content"], str)
+
 
 def test_llm_is_gpt5_family_helper():
     """LLM.is_gpt5_family should detect GPT-5 models via substring match."""

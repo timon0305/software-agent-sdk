@@ -140,8 +140,6 @@ def test_agent_system_message_selects_gpt5_prompt_when_available(tmp_path, monke
     - a sibling system_prompt-gpt.j2 file exists in the prompts dir.
     """
 
-    from openhands.sdk.agent import Agent
-
     # Create a temp prompts directory with both default and GPT-5 templates
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
@@ -169,8 +167,6 @@ def test_agent_system_message_selects_gpt5_prompt_when_available(tmp_path, monke
 def test_agent_system_message_uses_default_prompt_when_not_gpt5(tmp_path, monkeypatch):
     """Non-GPT-5 models should continue to use the default system prompt."""
 
-    from openhands.sdk.agent import Agent
-
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
     default_template = prompts_dir / "system_prompt.j2"
@@ -195,8 +191,6 @@ def test_agent_system_message_uses_configured_prompt_filename_even_for_gpt5(
     tmp_path, monkeypatch
 ):
     """If system_prompt_filename is overridden, GPT-5 should not auto-switch."""
-
-    from openhands.sdk.agent import Agent
 
     prompts_dir = tmp_path / "prompts"
     prompts_dir.mkdir()
