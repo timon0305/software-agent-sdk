@@ -108,10 +108,11 @@ jobs:
                   set -euo pipefail
 
                   # Choose PAT token (default vs override)
-                  PAT_TOKEN="$PAT_TOKEN_DEFAULT"
+                  # Trim whitespace from token
+                  PAT_TOKEN=$(echo "$PAT_TOKEN_DEFAULT" | xargs)
                   if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "$OVERRIDE_PAT" ]; then
                     echo "::add-mask::$OVERRIDE_PAT"
-                    PAT_TOKEN="$OVERRIDE_PAT"
+                    PAT_TOKEN=$(echo "$OVERRIDE_PAT" | xargs)
                   fi
                   if [ -z "$PAT_TOKEN" ]; then
                     echo "Missing PAT token (default or override)" >&2
