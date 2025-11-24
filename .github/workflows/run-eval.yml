@@ -232,26 +232,6 @@ jobs:
                   echo "Timed out waiting for benchmarks build to finish" >&2
                   exit 1
 
-            - name: Verify eval dispatch token
-              env:
-                  PAT_TOKEN: ${{ secrets.ALLHANDS_BOT_GITHUB_PAT }}
-              run: |
-                  set -euo pipefail
-                  if [ -z "$PAT_TOKEN" ]; then
-                    echo "Missing PAT_TOKEN for evaluation dispatch" >&2
-                    exit 1
-                  fi
-                  USER_STATUS=$(curl -sS -o /tmp/token_user.out -w "%{http_code}" -H "Authorization: token $PAT_TOKEN" https://api.github.com/user)
-                  echo "Token /user status: $USER_STATUS"
-                  REPO_STATUS=$(curl -sS -o /tmp/token_repo.out -w "%{http_code}" -H "Authorization: token $PAT_TOKEN" https://api.github.com/repos/${{ env.EVAL_REPO }})
-                  echo "Token repo status: $REPO_STATUS"
-                  if [ "$USER_STATUS" != "200" ] || [ "$REPO_STATUS" != "200" ]; then
-                    echo "Token does not have access to eval repo; responses:" >&2
-                    cat /tmp/token_user.out >&2 || true
-                    cat /tmp/token_repo.out >&2 || true
-                    exit 1
-                  fi
-
             - name: Dispatch evaluation workflow
               env:
                   PAT_TOKEN: ${{ secrets.ALLHANDS_BOT_GITHUB_PAT }}
