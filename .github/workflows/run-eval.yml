@@ -149,7 +149,6 @@ jobs:
                   echo "models=$MODELS" >> "$GITHUB_OUTPUT"
                   echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
                   echo "trigger_desc=$TRIGGER_DESCRIPTION" >> "$GITHUB_OUTPUT"
-                  echo "sdk_ref_input=$SDK_REF_INPUT" >> "$GITHUB_OUTPUT"
 
             - name: Checkout evaluated ref for PRs
               if: github.event_name == 'pull_request_target'
