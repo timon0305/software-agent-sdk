@@ -45,8 +45,8 @@ env:
     EVAL_AGENT_IMAGE: ghcr.io/openhands/eval-agent-server
     EVAL_AGENT_TARGET: source-minimal
     # Polling configuration for workflow status checks
-    MAX_POLL_ATTEMPTS: '40'  # 40 attempts × 30s = 20 minutes max wait
-    POLL_INTERVAL_SECONDS: '30'
+    MAX_POLL_ATTEMPTS: '80'  # 80 attempts × 60s = 80 minutes max wait
+    POLL_INTERVAL_SECONDS: '60'
 
 jobs:
     build-and-evaluate:
