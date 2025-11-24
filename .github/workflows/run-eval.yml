@@ -36,6 +36,7 @@ on:
 env:
     BENCHMARKS_REPO: OpenHands/benchmarks
     BENCHMARKS_REF: main
+    BENCHMARKS_BUILD_WORKFLOW: build-swe-bench-images.yml
     EVAL_REPO: OpenHands/evaluation
     EVAL_WORKFLOW: eval-job.yml
     DATASET: princeton-nlp/SWE-bench_Verified
@@ -157,64 +158,77 @@ jobs:
                   git fetch origin "$REF" --force
                   git checkout FETCH_HEAD
 
-            - name: Checkout benchmarks repo
-              uses: actions/checkout@v4
-              with:
-                  repository: ${{ env.BENCHMARKS_REPO }}
-                  ref: ${{ env.BENCHMARKS_REF }}
-                  path: benchmarks
-                  submodules: recursive
-
-            - name: Pin benchmarks SDK to evaluated ref
-              id: sdk-pin
-              run: |
-                  set -euo pipefail
-                  SDK_REF="${{ steps.params.outputs.sdk_ref }}"
-                  git -C benchmarks/vendor/software-agent-sdk fetch origin "$SDK_REF"
-                  git -C benchmarks/vendor/software-agent-sdk checkout "$SDK_REF"
-                  SDK_SHA=$(git -C benchmarks/vendor/software-agent-sdk rev-parse HEAD)
-                  echo "Using SDK ref $SDK_REF ($SDK_SHA) for image build"
-                  echo "sdk_sha=$SDK_SHA" >> "$GITHUB_OUTPUT"
-
-            - name: Set up uv
-              uses: astral-sh/setup-uv@v7
-              with:
-                  enable-cache: true
-
-            - name: Log in to GitHub Container Registry
-              uses: docker/login-action@v3
-              with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Build and push SWE-Bench images
+            - name: Dispatch benchmarks image build
+              id: build-dispatch
               env:
-                  SDK_SHA: ${{ steps.sdk-pin.outputs.sdk_sha }}
-                  SDK_REF: ${{ steps.params.outputs.sdk_ref }}
+                  PAT_TOKEN: ${{ secrets.ALLHANDS_BOT_GITHUB_PAT || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
                   EVAL_LIMIT: ${{ steps.params.outputs.eval_limit }}
                   DATASET: ${{ env.DATASET }}
                   SPLIT: ${{ env.SPLIT }}
                   MAX_BUILD_WORKERS: ${{ env.MAX_BUILD_WORKERS }}
-                  EVAL_AGENT_IMAGE: ${{ env.EVAL_AGENT_IMAGE }}
-                  EVAL_AGENT_TARGET: ${{ env.EVAL_AGENT_TARGET }}
-              working-directory: benchmarks
               run: |
                   set -euo pipefail
-                  echo "Building images for SDK $SDK_SHA (ref: $SDK_REF)"
-                  uv run benchmarks/swe_bench/build_images.py \
-                    --dataset "${DATASET}" \
-                    --split "${SPLIT}" \
-                    --image "${EVAL_AGENT_IMAGE}" \
-                    --target "${EVAL_AGENT_TARGET}" \
-                    --push \
-                    --max-workers "${MAX_BUILD_WORKERS}" \
-                    --n-limit "${EVAL_LIMIT}"
+                  if [ -z "$PAT_TOKEN" ]; then
+                    echo "Missing PAT_TOKEN for dispatching benchmarks build" >&2
+                    exit 1
+                  fi
+                  PAYLOAD=$(jq -n \
+                    --arg dataset "$DATASET" \
+                    --arg split "$SPLIT" \
+                    --arg max_workers "$MAX_BUILD_WORKERS" \
+                    --arg n_limit "$EVAL_LIMIT" \
+                    '{ref:"main", inputs: {dataset:$dataset, split:$split, "max-workers":$max_workers, "n-limit":$n_limit}}')
+                  RESPONSE=$(curl -sS -o /tmp/build-dispatch.out -w "%{http_code}" -X POST \
+                    -H "Authorization: Bearer $PAT_TOKEN" \
+                    -H "Accept: application/vnd.github+json" \
+                    -d "$PAYLOAD" \
+                    "https://api.github.com/repos/${{ env.BENCHMARKS_REPO }}/actions/workflows/${{ env.BENCHMARKS_BUILD_WORKFLOW }}/dispatches")
+                  if [ "$RESPONSE" != "204" ]; then
+                    echo "Benchmarks build dispatch failed (status $RESPONSE):" >&2
+                    cat /tmp/build-dispatch.out >&2
+                    exit 1
+                  fi
+                  echo "bench_build_dispatched=true" >> "$GITHUB_OUTPUT"
+
+            - name: Wait for benchmarks build completion
+              env:
+                  PAT_TOKEN: ${{ secrets.ALLHANDS_BOT_GITHUB_PAT || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  if [ -z "$PAT_TOKEN" ]; then
+                    echo "Missing PAT_TOKEN for checking benchmarks build status" >&2
+                    exit 1
+                  fi
+                  WORKFLOW_ID="${{ env.BENCHMARKS_BUILD_WORKFLOW }}"
+                  REPO="${{ env.BENCHMARKS_REPO }}"
+                  MAX_ATTEMPTS=40
+                  SLEEP_SECONDS=30
+                  for i in $(seq 1 $MAX_ATTEMPTS); do
+                    RUNS=$(curl -sS \
+                      -H "Authorization: Bearer $PAT_TOKEN" \
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW_ID}/runs?per_page=1&branch=main")
+                    STATUS=$(echo "$RUNS" | jq -r '.workflow_runs[0].status')
+                    CONCL=$(echo "$RUNS" | jq -r '.workflow_runs[0].conclusion')
+                    RUN_ID=$(echo "$RUNS" | jq -r '.workflow_runs[0].id')
+                    echo "Benchmarks build run ${RUN_ID}: status=${STATUS}, conclusion=${CONCL}"
+                    if [ "$STATUS" = "completed" ]; then
+                      if [ "$CONCL" = "success" ]; then
+                        exit 0
+                      else
+                        echo "Benchmarks build failed with conclusion ${CONCL}" >&2
+                        exit 1
+                      fi
+                    fi
+                    sleep $SLEEP_SECONDS
+                  done
+                  echo "Timed out waiting for benchmarks build to finish" >&2
+                  exit 1
 
             - name: Dispatch evaluation workflow
               env:
                   PAT_TOKEN: ${{ secrets.ALLHANDS_BOT_GITHUB_PAT || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-                  SDK_SHA: ${{ steps.sdk-pin.outputs.sdk_sha }}
+                  SDK_SHA: ${{ steps.params.outputs.sdk_ref }}
                   EVAL_LIMIT: ${{ steps.params.outputs.eval_limit }}
                   MODELS: ${{ steps.params.outputs.models }}
                   EVAL_REPO: ${{ env.EVAL_REPO }}
