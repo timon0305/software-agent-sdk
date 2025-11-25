@@ -66,7 +66,6 @@ conversation = Conversation(
     callbacks=[conversation_callback],
     workspace=cwd,
 )
-# Set security analyzer via conversation (new approach after deprecation)
 conversation.set_security_analyzer(LLMSecurityAnalyzer())
 
 logger.info("Starting conversation with MCP integration...")
