@@ -169,7 +169,7 @@ jobs:
                   git fetch origin "$REF" --force
                   git checkout FETCH_HEAD
 
-            - name: Get current commit SHA
+            - name: Resolve SDK commit SHA for evaluation
               id: get-sha
               run: |
                   SDK_SHA=$(git rev-parse HEAD)
