@@ -80,22 +80,23 @@ jobs:
 
             - name: Load model IDs
               id: load-models
+              env:
+                  WORKSPACE: ${{ github.workspace }}
               run: |
                   # Extract model IDs by parsing resolve_model_configs.py
                   python3 - <<'PYEOF' >> "$GITHUB_OUTPUT"
                   import re
                   import json
+                  import os
 
-                  # Read the resolve_model_configs.py file
-                  with open('.github/run-eval/resolve_model_configs.py', 'r') as f:
+                  # Read the resolve_model_configs.py file using WORKSPACE env var
+                  workspace = os.environ.get('WORKSPACE', os.getcwd())
+                  config_file = os.path.join(workspace, '.github', 'run-eval', 'resolve_model_configs.py')
+
+                  with open(config_file, 'r') as f:
                       content = f.read()
 
                   # Extract all model IDs from the MODELS_CONFIG dictionary
-                  # Match lines like: "model-id": {
-                  pattern = r'"([^"]+)":\s*\{'
-                  matches = re.findall(pattern, content)
-
-                  # Filter to get only model IDs (keys in MODELS_CONFIG dict)
                   # We need to find the MODELS_CONFIG section and extract IDs from there
                   models_section = content[content.find('MODELS_CONFIG = {'):content.find('\n}', content.find('MODELS_CONFIG'))]
                   ids = re.findall(r'"([^"]+)":\s*\{', models_section)
