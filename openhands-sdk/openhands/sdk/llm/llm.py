@@ -888,7 +888,7 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
               expectations; see the GPT-5 Codex prompting guide for details:
               https://cookbook.openai.com/examples/gpt-5-codex_prompting_guide
         """
-        return "gpt-5" in self.model
+        return "gpt-5" in self.model and "codex" not in self.model
 
     @property
     def model_info(self) -> dict | None:
