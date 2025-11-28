@@ -2,6 +2,7 @@ import argparse
 
 import uvicorn
 
+from openhands.agent_server import __version__
 from openhands.agent_server.logging_config import LOGGING_CONFIG
 from openhands.sdk.logger import DEBUG
 
@@ -24,7 +25,9 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"🙌 Starting OpenHands Agent Server on {args.host}:{args.port}")
+    print(
+        f"🙌 Starting OpenHands Agent Server {__version__} on {args.host}:{args.port}"
+    )
     print(f"📖 API docs will be available at http://{args.host}:{args.port}/docs")
     print(f"🔄 Auto-reload: {'enabled' if args.reload else 'disabled'}")
 
