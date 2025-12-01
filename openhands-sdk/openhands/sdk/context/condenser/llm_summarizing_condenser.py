@@ -78,8 +78,8 @@ class LLMSummarizingCondenser(RollingCondenser):
                 total_len = len(view)
                 max_tail_possible = max(0, total_len - self.keep_first)
                 low, high = 0, max_tail_possible
-                # We do not include the future summary event in counting;
-                # the reserved margin covers its cost.
+                # We do not include the future summary event in counting; the
+                # reserved margin covers its cost.
                 while low <= high:
                     mid = (low + high) // 2
                     kept = list(head) + (list(view[-mid:]) if mid > 0 else [])
@@ -96,6 +96,10 @@ class LLMSummarizingCondenser(RollingCondenser):
 
         if events_from_tail is None:
             target_size = self.max_size // 2
+            if view.unhandled_condensation_request:
+                # Condensation triggered by a condensation request
+                # should be calculated based on the view size.
+                target_size = len(view) // 2
             # Number of events to keep from the tail -- target size, minus however many
             # prefix events from the head, minus one for the summarization event
             events_from_tail = max(0, target_size - len(head) - 1)
@@ -127,9 +131,10 @@ class LLMSummarizingCondenser(RollingCondenser):
 
         messages = [Message(role="user", content=[TextContent(text=prompt)])]
 
+        # Do not pass extra_body explicitly. The LLM handles forwarding
+        # litellm_extra_body only when it is non-empty.
         llm_response = self.llm.completion(
             messages=messages,
-            extra_body=self.llm.litellm_extra_body,
         )
         # Extract summary from the LLMResponse message
         summary = None
