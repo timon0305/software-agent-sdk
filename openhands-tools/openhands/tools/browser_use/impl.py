@@ -251,6 +251,22 @@ class BrowserToolExecutor(ToolExecutor[BrowserAction, BrowserObservation]):
         if not self._initialized:
             # Initialize browser session with our config
             await self._server._init_browser_session(**self._config)
+
+            # Navigate to about:blank to ensure at least one page exists
+            # BrowserSession.start() initializes the browser but doesn't create pages.
+            # This ensures we have a page to work with, preventing empty state issues
+            # when get_browser_state_summary() is called.
+            try:
+                await self._server._navigate("about:blank", new_tab=False)
+                logger.debug("Initialized browser session with initial page")
+            except Exception as e:
+                # Log warning but don't fail initialization
+                # The browser session is initialized even if initial navigation fails
+                logger.warning(
+                    f"Failed to create initial page after browser initialization: {e}. "
+                    "Browser session is initialized but may have no pages."
+                )
+
             self._initialized = True
 
     # Navigation & Browser Control Methods
