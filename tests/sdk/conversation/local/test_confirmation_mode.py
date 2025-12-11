@@ -443,8 +443,7 @@ class TestConfirmationMode:
             self.conversation.run()
 
         assert (
-            self.conversation.state.execution_status
-            == ConversationExecutionStatus.FINISHED
+            self.conversation.state.execution_status == ConversationExecutionStatus.IDLE
         )
 
         msg_events = [
@@ -491,7 +490,7 @@ class TestConfirmationMode:
             assert len(rejection_events) == 0
             assert (
                 self.conversation.state.execution_status
-                == ConversationExecutionStatus.FINISHED
+                == ConversationExecutionStatus.IDLE
             )
         else:
             self.conversation.reject_pending_actions("Not safe to run")
