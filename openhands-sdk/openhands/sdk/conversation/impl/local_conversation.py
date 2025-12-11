@@ -54,7 +54,6 @@ class LocalConversation(BaseConversation):
     _stuck_detector: StuckDetector | None
     llm_registry: LLMRegistry
     _cleanup_initiated: bool
-    _new_user_message: bool = False
 
     def __init__(
         self,
@@ -229,7 +228,7 @@ class LocalConversation(BaseConversation):
                     ConversationExecutionStatus.IDLE
                 )  # now we have a new message
             # Signal that a new user message arrived during or between steps
-            self._new_user_message = True
+            self._state._new_user_message = True
 
             # TODO: We should add test cases for all these scenarios
             activated_skill_names: list[str] = []
@@ -281,7 +280,7 @@ class LocalConversation(BaseConversation):
             # If already IDLE and there is no new user message, there's nothing to do.
             if (
                 self._state.execution_status == ConversationExecutionStatus.IDLE
-                and not getattr(self, "_new_user_message", False)
+                and not self._state._new_user_message
             ):
                 return
             if self._state.execution_status in [
@@ -309,7 +308,7 @@ class LocalConversation(BaseConversation):
                         ConversationExecutionStatus.FINISHED,
                         ConversationExecutionStatus.IDLE,
                     ]:
-                        if self._new_user_message:
+                        if self._state._new_user_message:
                             # Allow one more iteration to process the new message
                             self._state.execution_status = (
                                 ConversationExecutionStatus.RUNNING
@@ -319,7 +318,7 @@ class LocalConversation(BaseConversation):
 
                     # Clear the new-user-message flag just before stepping; any
                     # message arriving during this step will set it again.
-                    self._new_user_message = False
+                    self._state._new_user_message = False
                     # Pause attempts to acquire the state lock
                     # Before value can be modified step can be taken
                     # Ensure step conditions are checked when lock is already acquired
@@ -361,7 +360,7 @@ class LocalConversation(BaseConversation):
                         break
                     if (
                         self.state.execution_status == ConversationExecutionStatus.IDLE
-                        and not self._new_user_message
+                        and not self._state._new_user_message
                     ):
                         break
         except Exception as e:
