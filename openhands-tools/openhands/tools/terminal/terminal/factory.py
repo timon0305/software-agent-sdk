@@ -1,5 +1,6 @@
 """Factory for creating appropriate terminal sessions based on system capabilities."""
 
+import os
 import platform
 import subprocess
 from typing import Literal
@@ -9,6 +10,23 @@ from openhands.tools.terminal.terminal.terminal_session import TerminalSession
 
 
 logger = get_logger(__name__)
+
+
+def _is_ci_environment() -> bool:
+    """Detect if running in a CI environment where PTY may not work."""
+    ci_env_vars = [
+        "CI",
+        "BITBUCKET_PIPELINE_UUID",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "JENKINS_URL",
+        "TRAVIS",
+        "CIRCLECI",
+        "BUILDKITE",
+        "AZURE_PIPELINES",
+        "TF_BUILD",
+    ]
+    return any(os.environ.get(var) for var in ci_env_vars)
 
 
 def _is_tmux_available() -> bool:
@@ -50,7 +68,7 @@ def create_terminal_session(
     work_dir: str,
     username: str | None = None,
     no_change_timeout_seconds: int | None = None,
-    terminal_type: Literal["tmux", "subprocess"] | None = None,
+    terminal_type: Literal["tmux", "subprocess", "pipe"] | None = None,
     shell_path: str | None = None,
 ) -> TerminalSession:
     """Create an appropriate terminal session based on system capabilities.
@@ -59,9 +77,10 @@ def create_terminal_session(
         work_dir: Working directory for the session
         username: Optional username for the session
         no_change_timeout_seconds: Timeout for no output change
-        terminal_type: Force a specific session type ('tmux', 'subprocess')
-                     If None, auto-detect based on system capabilities
-        shell_path: Path to the shell binary (for subprocess terminal type only).
+        terminal_type: Force a specific session type ('tmux', 'subprocess', 'pipe')
+                     If None, auto-detect based on system capabilities.
+                     'pipe' is recommended for CI environments where PTY doesn't work.
+        shell_path: Path to the shell binary (for subprocess/pipe terminal types).
                    If None, will auto-detect bash from PATH.
 
     Returns:
@@ -94,6 +113,14 @@ def create_terminal_session(
             logger.info("Using forced SubprocessTerminal")
             terminal = SubprocessTerminal(work_dir, username, shell_path)
             return TerminalSession(terminal, no_change_timeout_seconds)
+        elif terminal_type == "pipe":
+            from openhands.tools.terminal.terminal.pipe_subprocess_terminal import (
+                PipeSubprocessTerminal,
+            )
+
+            logger.info("Using forced PipeSubprocessTerminal (CI-friendly)")
+            terminal = PipeSubprocessTerminal(work_dir, username, shell_path)
+            return TerminalSession(terminal, no_change_timeout_seconds)
         else:
             raise ValueError(f"Unknown session type: {terminal_type}")
 
@@ -103,7 +130,7 @@ def create_terminal_session(
     if system == "Windows":
         raise NotImplementedError("Windows is not supported yet for OpenHands V1.")
     else:
-        # On Unix-like systems, prefer tmux if available, otherwise use subprocess
+        # On Unix-like systems, prefer tmux if available
         if _is_tmux_available():
             from openhands.tools.terminal.terminal.tmux_terminal import (
                 TmuxTerminal,
@@ -112,11 +139,25 @@ def create_terminal_session(
             logger.info("Auto-detected: Using TmuxTerminal (tmux available)")
             terminal = TmuxTerminal(work_dir, username)
             return TerminalSession(terminal, no_change_timeout_seconds)
-        else:
-            from openhands.tools.terminal.terminal.subprocess_terminal import (
-                SubprocessTerminal,
+
+        # In CI environments, use pipe-based terminal (PTY doesn't work reliably)
+        if _is_ci_environment():
+            from openhands.tools.terminal.terminal.pipe_subprocess_terminal import (
+                PipeSubprocessTerminal,
             )
 
-            logger.info("Auto-detected: Using SubprocessTerminal (tmux not available)")
-            terminal = SubprocessTerminal(work_dir, username, shell_path)
+            logger.info(
+                "Auto-detected: Using PipeSubprocessTerminal "
+                "(CI environment detected, PTY may not work)"
+            )
+            terminal = PipeSubprocessTerminal(work_dir, username, shell_path)
             return TerminalSession(terminal, no_change_timeout_seconds)
+
+        # Default to PTY-based subprocess terminal
+        from openhands.tools.terminal.terminal.subprocess_terminal import (
+            SubprocessTerminal,
+        )
+
+        logger.info("Auto-detected: Using SubprocessTerminal (tmux not available)")
+        terminal = SubprocessTerminal(work_dir, username, shell_path)
+        return TerminalSession(terminal, no_change_timeout_seconds)
