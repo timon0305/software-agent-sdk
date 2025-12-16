@@ -617,3 +617,103 @@ defined in user's repository.\n"
         assert "**$Z_SECRET**" in result
         assert "**$A_SECRET**" in result
         assert "**$M_SECRET**" in result
+
+    def test_get_secret_names_with_descriptions_no_secrets(self):
+        """Test get_secret_names with include_descriptions=True and no secrets."""
+        context = AgentContext()
+        result = context.get_secret_names(include_descriptions=True)
+        assert result == []
+
+    def test_get_secret_names_with_descriptions_none_secrets(self):
+        """Test get_secret_names with include_descriptions=True when secrets is None."""
+        context = AgentContext(secrets=None)
+        result = context.get_secret_names(include_descriptions=True)
+        assert result == []
+
+    def test_get_secret_names_with_descriptions_plain_strings(self):
+        """Test get_secret_names with include_descriptions=True and plain strings."""
+        secrets = {
+            "GITHUB_TOKEN": "test_token_123",
+            "API_KEY": "test_api_key",
+        }
+        context = AgentContext(secrets=secrets)
+        result = context.get_secret_names(include_descriptions=True)
+
+        # Convert to dict for easier assertion
+        result_dict = {item["name"]: item["description"] for item in result}
+        assert result_dict == {"GITHUB_TOKEN": None, "API_KEY": None}
+
+    def test_get_secret_names_with_descriptions_with_secret_sources(self):
+        """Test get_secret_names with include_descriptions=True and SecretSource."""
+        from pydantic import SecretStr
+
+        from openhands.sdk.secret import StaticSecret
+
+        secrets = {
+            "GITHUB_TOKEN": StaticSecret(
+                value=SecretStr("ghp_xxx"),
+                description="Personal access token for GitHub API",
+            ),
+            "API_KEY": StaticSecret(
+                value=SecretStr("api-key-value"),
+                description="API key for external service",
+            ),
+        }
+        context = AgentContext(secrets=secrets)
+        result = context.get_secret_names(include_descriptions=True)
+
+        # Convert to dict for easier assertion
+        result_dict = {item["name"]: item["description"] for item in result}
+        assert result_dict == {
+            "GITHUB_TOKEN": "Personal access token for GitHub API",
+            "API_KEY": "API key for external service",
+        }
+
+    def test_get_secret_names_with_descriptions_mixed(self):
+        """Test get_secret_names with include_descriptions=True and mixed types."""
+        from pydantic import SecretStr
+
+        from openhands.sdk.secret import StaticSecret
+
+        secrets = {
+            "GITHUB_TOKEN": StaticSecret(
+                value=SecretStr("ghp_xxx"),
+                description="Personal access token for GitHub API",
+            ),
+            "PLAIN_SECRET": "plain-value",  # No description
+        }
+        context = AgentContext(secrets=secrets)
+        result = context.get_secret_names(include_descriptions=True)
+
+        # Convert to dict for easier assertion
+        result_dict = {item["name"]: item["description"] for item in result}
+        assert result_dict == {
+            "GITHUB_TOKEN": "Personal access token for GitHub API",
+            "PLAIN_SECRET": None,
+        }
+
+    def test_get_system_message_suffix_with_secret_descriptions(self):
+        """Test system message suffix includes secret descriptions."""
+        from pydantic import SecretStr
+
+        from openhands.sdk.secret import StaticSecret
+
+        secrets = {
+            "GITHUB_TOKEN": StaticSecret(
+                value=SecretStr("ghp_xxx"),
+                description="Personal access token for GitHub API",
+            ),
+            "API_KEY": "plain-api-key",  # No description
+        }
+        context = AgentContext(secrets=secrets)
+        result = context.get_system_message_suffix()
+
+        assert result is not None
+        assert "<CUSTOM_SECRETS>" in result
+        # Check that description is included for GITHUB_TOKEN
+        assert "**$GITHUB_TOKEN**: Personal access token for GitHub API" in result
+        # Check that API_KEY is present without description
+        assert "**$API_KEY**" in result
+        # API_KEY should not have a colon after it (no description)
+        # The line should be just "* **$API_KEY**" without ": "
+        assert "**$API_KEY**:" not in result

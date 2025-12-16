@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 from collections.abc import Mapping
+from typing import Literal, overload
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -136,15 +137,45 @@ class AgentContext(BaseModel):
             logger.warning(f"Failed to load public skills: {str(e)}")
         return self
 
-    def get_secret_names(self) -> list[str]:
+    @overload
+    def get_secret_names(
+        self, include_descriptions: Literal[False] = False
+    ) -> list[str]: ...
+
+    @overload
+    def get_secret_names(
+        self, include_descriptions: Literal[True]
+    ) -> list[dict[str, str | None]]: ...
+
+    def get_secret_names(
+        self, include_descriptions: bool = False
+    ) -> list[str] | list[dict[str, str | None]]:
         """Get the list of secret names from the secrets field.
 
+        Args:
+            include_descriptions: If True, returns a list of dicts with 'name' and
+                'description' keys. If False (default), returns a list of strings.
+
         Returns:
-            List of secret names. Returns an empty list if no secrets are configured.
+            If include_descriptions is False: List of secret names as strings.
+            If include_descriptions is True: List of dicts with 'name' and
+            'description'. Returns an empty list if no secrets are configured.
         """
         if not self.secrets:
             return []
-        return list(self.secrets.keys())
+
+        if not include_descriptions:
+            return list(self.secrets.keys())
+
+        from openhands.sdk.secret import SecretSource
+
+        result: list[dict[str, str | None]] = []
+        for name, value in self.secrets.items():
+            description = None
+            if isinstance(value, SecretSource):
+                description = value.description
+            result.append({"name": name, "description": description})
+        return result
 
     def get_system_message_suffix(self) -> str | None:
         """Get the system message with repo skill content and custom suffix.
@@ -158,15 +189,15 @@ class AgentContext(BaseModel):
         repo_skills = [s for s in self.skills if s.trigger is None]
         logger.debug(f"Triggered {len(repo_skills)} repository skills: {repo_skills}")
         # Build the workspace context information
-        secret_names = self.get_secret_names()
-        if repo_skills or self.system_message_suffix or secret_names:
+        secrets_info = self.get_secret_names(include_descriptions=True)
+        if repo_skills or self.system_message_suffix or secrets_info:
             # TODO(test): add a test for this rendering to make sure they work
             formatted_text = render_template(
                 prompt_dir=str(PROMPT_DIR),
                 template_name="system_message_suffix.j2",
                 repo_skills=repo_skills,
                 system_message_suffix=self.system_message_suffix or "",
-                secret_names=secret_names,
+                secrets_info=secrets_info,
             ).strip()
             return formatted_text
         elif self.system_message_suffix and self.system_message_suffix.strip():

@@ -116,6 +116,27 @@ class SecretRegistry(OpenHandsModel):
 
         return masked_text
 
+    def get_secret_descriptions(self) -> dict[str, str | None]:
+        """Get descriptions for all registered secrets.
+
+        Returns:
+            Dictionary mapping secret keys to their descriptions.
+            If a secret has no description, the value will be None.
+        """
+        return {key: source.description for key, source in self.secret_sources.items()}
+
+    def get_secrets_info(self) -> list[dict[str, str | None]]:
+        """Get information about all registered secrets.
+
+        Returns:
+            List of dictionaries containing secret name and description.
+            Each dict has 'name' and 'description' keys.
+        """
+        return [
+            {"name": key, "description": source.description}
+            for key, source in self.secret_sources.items()
+        ]
+
 
 def _wrap_secret(value: SecretValue) -> SecretSource:
     """Convert the value given to a secret source"""

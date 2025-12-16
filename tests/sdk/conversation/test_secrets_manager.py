@@ -152,3 +152,80 @@ def test_get_secrets_as_env_vars_handles_callable_exceptions():
 
     # Only working secret should be returned
     assert env_vars == {"WORKING_SECRET": "working-value"}
+
+
+def test_get_secret_descriptions_empty():
+    """Test get_secret_descriptions with no secrets."""
+    secret_registry = SecretRegistry()
+    assert secret_registry.get_secret_descriptions() == {}
+
+
+def test_get_secret_descriptions_with_static_secrets():
+    """Test get_secret_descriptions with static secrets (no descriptions)."""
+    secret_registry = SecretRegistry()
+    secret_registry.update_secrets(
+        {
+            "API_KEY": "test-api-key",
+            "DATABASE_URL": "postgresql://localhost/test",
+        }
+    )
+
+    descriptions = secret_registry.get_secret_descriptions()
+    assert descriptions == {"API_KEY": None, "DATABASE_URL": None}
+
+
+def test_get_secret_descriptions_with_described_secrets():
+    """Test get_secret_descriptions with secrets that have descriptions."""
+    secret_registry = SecretRegistry()
+
+    secret_registry.update_secrets(
+        {
+            "GITHUB_TOKEN": StaticSecret(
+                value=SecretStr("ghp_xxx"),
+                description="Personal access token for GitHub API",
+            ),
+            "API_KEY": StaticSecret(
+                value=SecretStr("api-key-value"),
+                description="API key for external service",
+            ),
+            "NO_DESC_SECRET": "plain-value",  # No description
+        }
+    )
+
+    descriptions = secret_registry.get_secret_descriptions()
+    assert descriptions == {
+        "GITHUB_TOKEN": "Personal access token for GitHub API",
+        "API_KEY": "API key for external service",
+        "NO_DESC_SECRET": None,
+    }
+
+
+def test_get_secrets_info_empty():
+    """Test get_secrets_info with no secrets."""
+    secret_registry = SecretRegistry()
+    assert secret_registry.get_secrets_info() == []
+
+
+def test_get_secrets_info_with_mixed_secrets():
+    """Test get_secrets_info with mixed secrets (with and without descriptions)."""
+    secret_registry = SecretRegistry()
+
+    secret_registry.update_secrets(
+        {
+            "GITHUB_TOKEN": StaticSecret(
+                value=SecretStr("ghp_xxx"),
+                description="Personal access token for GitHub API",
+            ),
+            "PLAIN_SECRET": "plain-value",
+        }
+    )
+
+    info = secret_registry.get_secrets_info()
+    assert len(info) == 2
+
+    # Convert to dict for easier assertion
+    info_dict = {item["name"]: item["description"] for item in info}
+    assert info_dict == {
+        "GITHUB_TOKEN": "Personal access token for GitHub API",
+        "PLAIN_SECRET": None,
+    }
