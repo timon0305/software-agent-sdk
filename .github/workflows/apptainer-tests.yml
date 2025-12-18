@@ -21,3 +21,14 @@ jobs:
 
             - name: Run an apptainer container
               run: apptainer run docker://alpine cat /etc/os-release
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  enable-cache: true
+
+            - name: Install deps
+              run: uv sync --frozen --group dev
+
+            - name: Run ApptainerWorkspace unit tests
+              run: uv run pytest tests/workspace/test_apptainer_workspace.py -v
