@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Literal, Self
 from pydantic import Field
 
 from openhands.sdk.llm import ImageContent, TextContent
-from openhands.sdk.logger import get_logger
 from openhands.sdk.tool import (
     Action,
     Observation,
@@ -81,8 +80,7 @@ class BrowserObservation(Observation):
                 file_path.write_bytes(image_data)
 
             return str(file_path)
-        except Exception as e:
-            logger.debug(f"Failed to save screenshot to {save_dir}: {e}")
+        except Exception:
             return None
 
     @property
@@ -581,6 +579,95 @@ class BrowserCloseTabTool(ToolDefinition[BrowserCloseTabAction, BrowserObservati
         ]
 
 
+# ============================================
+# `browser_get_storage`
+# ============================================
+class BrowserGetStorageAction(BrowserAction):
+    """Schema for getting browser storage (cookies, local storage, session storage)."""
+
+    pass
+
+
+BROWSER_GET_STORAGE_DESCRIPTION = """Get browser storage data including cookies,
+local storage, and session storage.
+
+This tool extracts all cookies and storage data from the current browser session.
+Useful for debugging, session management, or extracting authentication tokens.
+"""
+
+
+class BrowserGetStorageTool(
+    ToolDefinition[BrowserGetStorageAction, BrowserObservation]
+):
+    """Tool for getting browser storage."""
+
+    @classmethod
+    def create(cls, executor: "BrowserToolExecutor") -> Sequence[Self]:
+        return [
+            cls(
+                description=BROWSER_GET_STORAGE_DESCRIPTION,
+                action_type=BrowserGetStorageAction,
+                observation_type=BrowserObservation,
+                annotations=ToolAnnotations(
+                    title="browser_get_storage",
+                    readOnlyHint=True,
+                    destructiveHint=False,
+                    idempotentHint=True,
+                    openWorldHint=False,
+                ),
+                executor=executor,
+            )
+        ]
+
+
+# ============================================
+# `browser_set_storage`
+# ============================================
+class BrowserSetStorageAction(BrowserAction):
+    """Schema for setting browser storage (cookies, local storage, session storage)."""
+
+    storage_state: dict = Field(
+        description="Storage state dictionary containing 'cookies' and 'origins' (from browser_get_storage)"  # noqa: E501
+    )
+
+
+BROWSER_SET_STORAGE_DESCRIPTION = """Set browser storage data including cookies,
+local storage, and session storage.
+
+This tool allows you to restore or set the browser's storage state. You can use the
+output from browser_get_storage to restore a previous session.
+
+Parameters:
+- storage_state: A dictionary containing 'cookies' and 'origins'.
+  - cookies: List of cookie objects
+  - origins: List of origin objects containing 'localStorage' and 'sessionStorage'
+"""
+
+
+class BrowserSetStorageTool(
+    ToolDefinition[BrowserSetStorageAction, BrowserObservation]
+):
+    """Tool for setting browser storage."""
+
+    @classmethod
+    def create(cls, executor: "BrowserToolExecutor") -> Sequence[Self]:
+        return [
+            cls(
+                description=BROWSER_SET_STORAGE_DESCRIPTION,
+                action_type=BrowserSetStorageAction,
+                observation_type=BrowserObservation,
+                annotations=ToolAnnotations(
+                    title="browser_set_storage",
+                    readOnlyHint=False,
+                    destructiveHint=True,
+                    idempotentHint=False,
+                    openWorldHint=False,
+                ),
+                executor=executor,
+            )
+        ]
+
+
 class BrowserToolSet(ToolDefinition[BrowserAction, BrowserObservation]):
     """A set of all browser tools.
 
@@ -632,6 +719,8 @@ class BrowserToolSet(ToolDefinition[BrowserAction, BrowserObservation]):
             BrowserListTabsTool,
             BrowserSwitchTabTool,
             BrowserCloseTabTool,
+            BrowserGetStorageTool,
+            BrowserSetStorageTool,
         ]:
             tools.extend(tool_class.create(executor))
         return tools
