@@ -42,7 +42,7 @@ print(f"Loaded {len(knowledge_skills)} knowledge skills")
 
 ## For More Information
 
-- **Complete Tutorial**: See [examples/01_standalone_sdk/04_use_skill_packages.py](../examples/01_standalone_sdk/04_use_skill_packages.py)
+- **Complete Tutorial**: See [examples/01_standalone_sdk/31_use_skill_packages.py](../examples/01_standalone_sdk/31_use_skill_packages.py)
 - **Creating Packages**: [Skill Packages Tutorial](https://github.com/OpenHands/package-poc/blob/main/doc/tutorial-flow.md)
 - **Package POC Repository**: [OpenHands/package-poc](https://github.com/OpenHands/package-poc)
 

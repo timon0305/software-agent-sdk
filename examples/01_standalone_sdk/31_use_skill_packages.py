@@ -22,7 +22,6 @@ For more information on creating skill packages, see:
 import asyncio
 from pathlib import Path
 
-from openhands.sdk import Agent
 from openhands.sdk.context.skills import (
     get_skill_package,
     list_skill_packages,
@@ -46,12 +45,16 @@ async def list_available_packages():
         return
 
     for pkg in packages:
-        metadata = pkg["descriptor"]["metadata"]
-        skills = pkg["descriptor"]["spec"]["skills"]
+        # Access flat descriptor structure
+        descriptor = pkg["descriptor"]
+        display_name = descriptor.get("displayName", descriptor.get("name", "Unknown"))
+        version = descriptor.get("version", "N/A")
+        description = descriptor.get("description", "N/A")
+        skills = descriptor.get("skills", [])
 
-        print(f"\n📦 {metadata['displayName']} (v{metadata['version']})")
+        print(f"\n📦 {display_name} (v{version})")
         print(f"   Name: {pkg['name']}")
-        print(f"   Description: {metadata.get('description', 'N/A')}")
+        print(f"   Description: {description}")
         print(f"   Skills: {len(skills)}")
 
         for skill in skills:
@@ -72,19 +75,33 @@ async def show_package_details(package_name: str):
         print(f"Package '{package_name}' not found.")
         return
 
-    metadata = pkg["descriptor"]["metadata"]
-    spec = pkg["descriptor"]["spec"]
+    # Access flat descriptor structure
+    descriptor = pkg["descriptor"]
 
-    print(f"\nDisplay Name: {metadata['displayName']}")
-    print(f"Version: {metadata['version']}")
-    print(f"Author: {metadata.get('author', 'N/A')}")
-    print(f"License: {metadata.get('license', 'N/A')}")
-    print(f"Repository: {metadata.get('repository', 'N/A')}")
+    print(f"\nDisplay Name: {descriptor.get('displayName', 'Unknown')}")
+    print(f"Version: {descriptor.get('version', 'N/A')}")
 
-    print(f"\nTags: {', '.join(metadata.get('tags', []))}")
+    # Handle author field (can be string or object)
+    author = descriptor.get("author", "N/A")
+    if isinstance(author, dict):
+        author = author.get("name", "N/A")
+    print(f"Author: {author}")
+
+    print(f"License: {descriptor.get('license', 'N/A')}")
+
+    # Handle repository field (can be string or object)
+    repository = descriptor.get("repository", "N/A")
+    if isinstance(repository, dict):
+        repository = repository.get("url", "N/A")
+    print(f"Repository: {repository}")
+
+    # Tags may be in keywords field
+    tags = descriptor.get("keywords", [])
+    print(f"\nTags: {', '.join(tags) if tags else 'N/A'}")
 
     print("\nSkills:")
-    for skill in spec["skills"]:
+    skills = descriptor.get("skills", [])
+    for skill in skills:
         print(f"  • {skill['name']}")
         print(f"    Path: {skill['path']}")
         print(f"    Type: {skill.get('type', 'unknown')}")
@@ -101,7 +118,10 @@ async def load_and_inspect_skills(package_name: str):
     try:
         repo_skills, knowledge_skills = load_skills_from_package(package_name)
 
-        print(f"\nLoaded {len(repo_skills)} repo skills and {len(knowledge_skills)} knowledge skills")
+        print(
+            f"\nLoaded {len(repo_skills)} repo skills and "
+            f"{len(knowledge_skills)} knowledge skills"
+        )
 
         if repo_skills:
             print("\nRepo Skills (always active):")
