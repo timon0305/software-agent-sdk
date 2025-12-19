@@ -97,7 +97,9 @@ def test_apptainer_workspace_no_build_import():
     )
     # Note: ApptainerWorkspace does import build module for PlatformType/TargetType
     # so this may be '1' - we just verify the import works
-    assert result.stdout.strip() in ("0", "1")
+    # Get last line of stdout since build module may log additional output
+    last_line = result.stdout.strip().split("\n")[-1]
+    assert last_line in ("0", "1")
 
 
 def test_cleanup_terminates_process(mock_apptainer_workspace):

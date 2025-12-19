@@ -353,11 +353,13 @@ class ApptainerWorkspace(RemoteWorkspace):
 
     def __del__(self) -> None:
         """Clean up the Apptainer container when the workspace is destroyed."""
-        self.cleanup()
+        # Guard against accessing private attributes during interpreter shutdown
+        if getattr(self, "__pydantic_private__", None) is not None:
+            self.cleanup()
 
     def cleanup(self) -> None:
         """Stop and remove the Apptainer container."""
-        if self._instance_name:
+        if getattr(self, "_instance_name", None):
             # Stop logs streaming
             self._stop_logs.set()
             if self._logs_thread and self._logs_thread.is_alive():
