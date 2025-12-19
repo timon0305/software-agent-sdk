@@ -218,7 +218,7 @@ jobs:
                     -H "Accept: application/vnd.github+json" \
                     -d "$PAYLOAD" \
                     "https://api.github.com/repos/${EVAL_REPO}/actions/workflows/${EVAL_WORKFLOW}/dispatches")
-                  if [ "$RESPONSE" != "204" ]; then
+                  if [ "$RESPONSE" != "204" ] && [ "$RESPONSE" != "200" ] && [ "$RESPONSE" != "201" ]; then
                     echo "Dispatch failed (status $RESPONSE):" >&2
                     cat /tmp/dispatch.out >&2
                     exit 1
