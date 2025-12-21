@@ -43,17 +43,23 @@ def run_implicit_via_proxy() -> None:
     model = "gemini-3-pro-preview"
     base_url = "https://llm-proxy.eval.all-hands.dev"
 
-    long_prefix = "\n".join(
-        [
-            (
-                "You are a policy analyzer. The following policy is stable across"
-                " requests."
-            ),
-            "".join(
-                ["A" * 2000]
-            ),  # Ensure request comfortably exceeds 2,048 tokens overall
-            "When asked later questions, refer to this policy.",
-        ]
+    # Build a large, stable prefix and also a large first user message to exceed
+    # the implicit caching threshold (~2,048 tokens). We deliberately use varied
+    # text to avoid odd tokenization edge-cases.
+    chunk = (
+        "This is stable policy content intended for caching. "
+        "It includes varied words and punctuation to avoid unusual tokenization "
+        "effects. Keep answers consistent with this policy. "
+    )
+    long_prefix = (
+        "You are a policy analyzer. The following policy is stable across requests.\n"
+    )
+    long_prefix += chunk * 1000  # substantially large stable prefix
+    long_prefix += "\nWhen asked later questions, refer to this policy."
+
+    large_user_tail = (
+        "Additional stable context that repeats to ensure total prompt size is large. "
+        * 800
     )
 
     llm = LLM(
@@ -69,7 +75,10 @@ def run_implicit_via_proxy() -> None:
     def mk_msgs(question: str) -> list[Message]:
         return [
             Message(role="system", content=[TextContent(text=long_prefix)]),
-            Message(role="user", content=[TextContent(text=question)]),
+            Message(
+                role="user",
+                content=[TextContent(text=question + "\n" + large_user_tail)],
+            ),
         ]
 
     q = "Summarize the stable policy from earlier in ~50 words."
@@ -79,15 +88,22 @@ def run_implicit_via_proxy() -> None:
     print("First call done. Cost=$", r1.metrics.accumulated_cost)
 
     # Short sleep to improve chance of hit while staying in the implicit cache horizon
-    time.sleep(1.0)
+    time.sleep(2.0)
 
     # Second call - cache read expected
     r2 = llm.completion(mk_msgs(q))
     print("Second call done. Total cost=$", r2.metrics.accumulated_cost)
+
+    # Another short sleep
+    time.sleep(2.0)
+
+    # Third call - additional cache read expected
+    r3 = llm.completion(mk_msgs(q))
+    print("Third call done. Total cost=$", r3.metrics.accumulated_cost)
     print(
         "Inspect logs in",
         LOG_DIR,
-        "for usage_summary.cache_read_tokens > 0 on the second call.",
+        "for usage_summary.cache_read_tokens > 0 on second/third calls.",
     )
 
 
