@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Self
 
+import pytest
 from pydantic import Field
 
 from openhands.sdk.event.llm_convertible import SystemPromptEvent
@@ -48,6 +49,106 @@ class SimpleTool(ToolDefinition[SimpleAction, SimpleObservation]):
                 executor=SimpleExecutor(),
             )
         ]
+
+
+@pytest.fixture
+def openai_format_tool():
+    """OpenAI function format tool for testing backward compatibility."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "test_tool",
+            "description": "A test tool for testing",
+            "parameters": {
+                "type": "object",
+                "properties": {"arg1": {"type": "string", "description": "First arg"}},
+                "required": ["arg1"],
+            },
+        },
+    }
+
+
+def test_tools_accept_openai_format(openai_format_tool):
+    """Test that SystemPromptEvent accepts tools in OpenAI function format."""
+    event = SystemPromptEvent(
+        system_prompt=TextContent(text="Test system prompt"),
+        tools=[openai_format_tool],
+    )
+
+    assert len(event.tools) == 1
+    assert isinstance(event.tools[0], dict)
+    assert event.tools[0]["type"] == "function"
+    assert event.tools[0]["function"]["name"] == "test_tool"
+
+
+def test_tools_accept_tool_definition_format():
+    """Test that SystemPromptEvent accepts tools in ToolDefinition format."""
+    tool = SimpleTool.create()[0]
+
+    event = SystemPromptEvent(
+        system_prompt=TextContent(text="Test system prompt"),
+        tools=[tool],
+    )
+
+    assert len(event.tools) == 1
+    assert isinstance(event.tools[0], ToolDefinition)
+    assert event.tools[0].name == "simple"
+
+
+def test_tools_accept_mixed_formats(openai_format_tool):
+    """Test that SystemPromptEvent accepts mixed tool formats."""
+    tool_def = SimpleTool.create()[0]
+
+    event = SystemPromptEvent(
+        system_prompt=TextContent(text="Test system prompt"),
+        tools=[tool_def, openai_format_tool],
+    )
+
+    assert len(event.tools) == 2
+    assert isinstance(event.tools[0], ToolDefinition)
+    assert isinstance(event.tools[1], dict)
+
+
+def test_visualize_openai_format_tool(openai_format_tool):
+    """Test that visualize works with OpenAI format tools."""
+    event = SystemPromptEvent(
+        system_prompt=TextContent(text="Test system prompt"),
+        tools=[openai_format_tool],
+    )
+
+    visualization = event.visualize
+    visualization_text = visualization.plain
+
+    assert "test_tool" in visualization_text
+    assert "A test tool for testing" in visualization_text
+    assert "Parameters:" in visualization_text
+
+
+def test_model_validate_openai_format_tools():
+    """Test that model_validate works with OpenAI format tools from server."""
+    data = {
+        "kind": "SystemPromptEvent",
+        "id": "test-id",
+        "timestamp": "2025-01-01T00:00:00",
+        "source": "agent",
+        "system_prompt": {"type": "text", "text": "Hello"},
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "test",
+                    "description": "Test tool",
+                    "parameters": {},
+                },
+            }
+        ],
+    }
+
+    event = SystemPromptEvent.model_validate(data)
+
+    assert len(event.tools) == 1
+    assert isinstance(event.tools[0], dict)
+    assert event.tools[0]["function"]["name"] == "test"
 
 
 def test_visualize_no_data_mutation():
