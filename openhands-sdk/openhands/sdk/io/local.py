@@ -80,14 +80,9 @@ class LocalFileStore(FileStore):
 
         if not os.path.exists(full_path):
             raise FileNotFoundError(path)
-        result: str
-        try:
-            with open(full_path, encoding="utf-8") as f:
-                result = f.read()
-        except UnicodeDecodeError:
-            logger.debug(f"File {full_path} is binary, reading as bytes")
-            with open(full_path, "rb") as f:
-                result = f.read().decode("utf-8", errors="replace")
+
+        with open(full_path, encoding="utf-8") as f:
+            result = f.read()
 
         self.cache[full_path] = result
         return result
