@@ -29,6 +29,7 @@ on:
                 type: choice
                 options:
                     - '1'
+                    - '2'
                     - '50'
                     - '200'
                     - '500'
