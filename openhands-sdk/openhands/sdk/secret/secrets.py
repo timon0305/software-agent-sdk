@@ -1,12 +1,23 @@
 """Secret sources and types for handling sensitive data."""
 
+import logging
 from abc import ABC, abstractmethod
 
 import httpx
-from pydantic import Field, SecretStr, field_serializer, field_validator
+from pydantic import (
+    Field,
+    FieldSerializationInfo,
+    SecretStr,
+    field_serializer,
+    field_validator,
+)
+from pydantic.types import _secret_display
 
 from openhands.sdk.utils.models import DiscriminatedUnionMixin
 from openhands.sdk.utils.pydantic_secrets import serialize_secret, validate_secret
+
+
+logger = logging.getLogger(__name__)
 
 
 class SecretSource(DiscriminatedUnionMixin, ABC):
@@ -38,8 +49,27 @@ class StaticSecret(SecretSource):
         return validate_secret(v, info)
 
     @field_serializer("value", when_used="always")
-    def _serialize_secrets(self, v: SecretStr | None, info):
-        return serialize_secret(v, info)
+    def _serialize_secrets(
+        self, v: SecretStr | None, info: FieldSerializationInfo
+    ) -> str | None:
+        if v is None:
+            return None
+
+        result = serialize_secret(v, info)
+
+        # Check if the secret was masked by Pydantic
+        # _secret_display returns "**********" for non-empty secrets
+        if isinstance(result, SecretStr) and str(result) == _secret_display(
+            v.get_secret_value()
+        ):
+            logger.warning(
+                "No cipher context available, secret will be lost during serialization"
+            )
+            return None
+
+        # At this point result should be a string (encrypted or exposed)
+        assert isinstance(result, str)
+        return result
 
 
 class LookupSecret(SecretSource):

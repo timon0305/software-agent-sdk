@@ -100,6 +100,25 @@ def test_static_secret_with_value():
     assert validated.get_value() == "my-secret"
 
 
+def test_static_secret_serializes_to_none_without_cipher():
+    """Test StaticSecret serializes value as None when no cipher/expose context.
+
+    This ensures secrets are clearly marked as lost (not persisted) rather than
+    using ambiguous "**********" masking.
+    """
+    secret = StaticSecret(value=SecretStr("my-secret"))
+
+    # Without context, value should serialize to None (not "**********")
+    dumped = secret.model_dump(mode="json")
+    assert dumped == {"kind": "StaticSecret", "description": None, "value": None}
+
+    # When value is actually None internally, exclude_none omits it
+    secret_none = StaticSecret(value=None)
+    dumped_none = secret_none.model_dump(mode="json", exclude_none=True)
+    assert dumped_none == {"kind": "StaticSecret"}
+    assert "value" not in dumped_none
+
+
 def test_conversation_state_resume_with_redacted_secrets():
     """Test that conversation state can be resumed when secrets are redacted.
 
