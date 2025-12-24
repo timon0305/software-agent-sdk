@@ -5,6 +5,7 @@ import json
 import os
 import warnings
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args, get_origin
 
@@ -61,6 +62,7 @@ from litellm.utils import (
 
 from openhands.sdk.llm.exceptions import (
     LLMNoResponseError,
+    LLMTimeoutError,
     map_provider_exception,
 )
 
@@ -709,7 +711,8 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                         assert isinstance(self.api_key, SecretStr)
                         api_key_value = self.api_key.get_secret_value()
 
-                    ret = litellm_responses(
+                    ret = self._call_with_timeout(
+                        litellm_responses,
                         model=self.model,
                         input=typed_input,
                         instructions=instructions,
@@ -758,6 +761,21 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
     # =========================================================================
     # Transport + helpers
     # =========================================================================
+    def _call_with_timeout(self, fn: Callable[..., Any], **kwargs: Any) -> Any:
+        if not self.timeout:
+            return fn(**kwargs)
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(fn, **kwargs)
+        try:
+            return future.result(timeout=self.timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise LLMTimeoutError(
+                f"LLM request timed out after {self.timeout}s"
+            ) from exc
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
     def _transport_call(
         self,
         *,
@@ -798,24 +816,37 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                     api_key_value = self.api_key.get_secret_value()
 
                 # Some providers need renames handled in _normalize_call_kwargs.
-                ret = litellm_completion(
-                    model=self.model,
-                    api_key=api_key_value,
-                    api_base=self.base_url,
-                    api_version=self.api_version,
-                    timeout=self.timeout,
-                    drop_params=self.drop_params,
-                    seed=self.seed,
-                    messages=messages,
-                    **kwargs,
-                )
                 if enable_streaming and on_token is not None:
+                    ret = litellm_completion(
+                        model=self.model,
+                        api_key=api_key_value,
+                        api_base=self.base_url,
+                        api_version=self.api_version,
+                        timeout=self.timeout,
+                        drop_params=self.drop_params,
+                        seed=self.seed,
+                        messages=messages,
+                        **kwargs,
+                    )
                     assert isinstance(ret, CustomStreamWrapper)
                     chunks = []
                     for chunk in ret:
                         on_token(chunk)
                         chunks.append(chunk)
                     ret = litellm.stream_chunk_builder(chunks, messages=messages)
+                else:
+                    ret = self._call_with_timeout(
+                        litellm_completion,
+                        model=self.model,
+                        api_key=api_key_value,
+                        api_base=self.base_url,
+                        api_version=self.api_version,
+                        timeout=self.timeout,
+                        drop_params=self.drop_params,
+                        seed=self.seed,
+                        messages=messages,
+                        **kwargs,
+                    )
 
                 assert isinstance(ret, ModelResponse), (
                     f"Expected ModelResponse, got {type(ret)}"
