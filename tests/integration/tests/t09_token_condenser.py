@@ -52,9 +52,9 @@ class TokenCondenserTest(BaseIntegrationTest):
         name = (canonical or model_name or "").split("/")[-1]
         if name == "gpt-5.1-codex-max":
             raise SkipTest(
-                "This test stresses long repetitive tool loops to trigger token-based\n"
-                "condensation. GPT-5.1 Codex Max often declines such requests for\n"
-                "efficiency/safety reasons. Please run this test on a model that\n"
+                "This test stresses long repetitive tool loops to trigger token-based "
+                "condensation. GPT-5.1 Codex Max often declines such requests for "
+                "efficiency/safety reasons. Please run this test on a model that "
                 "allows extended interactive commands."
             )
 
