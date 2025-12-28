@@ -535,3 +535,78 @@ def test_most_aggressive_condensation_chosen(mock_llm: LLM) -> None:
     # Forgotten events: events[3:28] = 25 events
     expected_forgotten_count = 25
     assert len(result.forgotten_event_ids) == expected_forgotten_count
+
+
+def test_no_condensation_when_forgetting_range_empty(mock_llm: LLM) -> None:
+    """Test condenser returns View when no events can be forgotten.
+
+    This reproduces the bug in issue #1518 where:
+    1. should_condense returns True (event count exceeds max_size)
+    2. But _get_forgotten_events returns empty list due to atomic boundaries
+    3. The condenser should return the original View, not an empty Condensation
+
+    Without the fix, this creates an infinite loop of empty Condensations.
+
+    Note: This test verifies normal behavior. The edge case where no events can
+    be forgotten due to atomic boundaries is tested in
+    test_empty_forgotten_events_returns_view using a mock.
+    """
+    # Use a valid config
+    condenser = LLMSummarizingCondenser(llm=mock_llm, max_size=12, keep_first=4)
+    # target_size = 12 // 2 = 6
+    # suffix_events_to_keep = 6 - 4 - 1 = 1
+    # With 13 events: naive_end = 13 - 1 = 12
+    # forgetting_start = smallest index > 4 = 5
+    # forgetting_end = smallest index >= 12 = 12
+    # forgotten_events = events[5:12] = 7 events
+
+    # Create 13 message events
+    events: list[Event] = [message_event(f"Event {i}") for i in range(13)]
+    view = View.from_events(events)
+
+    # Verify normal behavior - condensation happens with non-empty forgotten events
+    assert condenser.should_condense(view)
+    result = condenser.condense(view)
+    assert isinstance(result, Condensation)
+    assert len(result.forgotten_event_ids) > 0
+
+
+def test_empty_forgotten_events_returns_view(mock_llm: LLM) -> None:
+    """Test that when _get_forgotten_events returns empty list, condense returns View.
+
+    This is the fix for issue #1518 - prevent infinite loop of empty Condensations.
+    """
+    from unittest.mock import patch
+
+    from openhands.sdk.context.condenser.llm_summarizing_condenser import (
+        LLMSummarizingCondenser,
+    )
+
+    max_size = 10
+    keep_first = 3
+    condenser = LLMSummarizingCondenser(
+        llm=mock_llm, max_size=max_size, keep_first=keep_first
+    )
+
+    # Create events that exceed max_size
+    events: list[Event] = [message_event(f"Event {i}") for i in range(15)]
+    view = View.from_events(events)
+
+    # Verify should_condense returns True
+    assert condenser.should_condense(view)
+
+    # Mock _get_forgotten_events to return empty list (simulating boundary edge case)
+    with patch.object(
+        condenser, "_get_forgotten_events", return_value=([], 4)
+    ) as mock_get_forgotten:
+        result = condenser.condense(view)
+
+        # The condenser should return View (not Condensation) when no events to forget
+        assert isinstance(result, View), (
+            "Expected View when no events can be forgotten, "
+            f"but got {type(result).__name__}"
+        )
+        # LLM should NOT be called since there's nothing to summarize
+        cast(MagicMock, mock_llm.completion).assert_not_called()
+        # _get_forgotten_events should have been called
+        mock_get_forgotten.assert_called_once()

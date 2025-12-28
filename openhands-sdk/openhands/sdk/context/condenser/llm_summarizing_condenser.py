@@ -236,3 +236,23 @@ class LLMSummarizingCondenser(RollingCondenser):
             forgotten_events=forgotten_events,
             summary_offset=summary_offset,
         )
+
+    def condense(self, view: View, agent_llm: LLM | None = None) -> View | Condensation:
+        """Condense the view, handling the edge case of empty forgotten events.
+
+        This overrides the base class to handle the edge case where atomic boundaries
+        prevent any events from being forgotten. Without this check, the condenser
+        would generate a Condensation with empty forgotten_event_ids, leading to an
+        infinite loop (issue #1518).
+        """
+        if not self.should_condense(view, agent_llm=agent_llm):
+            return view
+
+        # Check if there are actually events to forget
+        forgotten_events, _ = self._get_forgotten_events(view, agent_llm=agent_llm)
+        if not forgotten_events:
+            # No events can be forgotten due to atomic boundaries - return original view
+            # This prevents infinite loops of empty Condensations
+            return view
+
+        return self.get_condensation(view, agent_llm=agent_llm)
