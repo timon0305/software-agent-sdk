@@ -255,8 +255,8 @@ jobs:
         env:
             IMAGE: ${{ inputs.image != '' && inputs.image || 'ghcr.io/openhands/agent-server' }}
             BASE_IMAGE: ${{ inputs.base_image != '' && inputs.base_image || matrix.base_image }}
-            # For source builds, append '-source' to the variant tag
-            CUSTOM_TAGS: ${{ matrix.target == 'source' && format('{0}-source', matrix.variant) || matrix.variant }}
+            # Use variant as custom tag - build.py handles target suffix (e.g., -source) automatically
+            CUSTOM_TAGS: ${{ matrix.variant }}
             VARIANT: ${{ matrix.variant }}
             ARCH: ${{ matrix.arch }}
             TARGET: ${{ matrix.target }}
@@ -571,8 +571,13 @@ jobs:
                           SHORT_SHA="$VARIANT_SHA"
                       fi
                       
-                      # Use custom_tags as the key (includes -source suffix for source builds)
-                      KEY="$CUSTOM_TAGS"
+                      # Construct key from custom_tags and target
+                      # For source builds, append -source suffix to match tag format
+                      if [[ "$TARGET" == "source" ]]; then
+                          KEY="${CUSTOM_TAGS}-source"
+                      else
+                          KEY="$CUSTOM_TAGS"
+                      fi
                       
                       # Store variant information
                       VARIANT_BASE_IMAGE[$KEY]=$BASE_IMAGE
