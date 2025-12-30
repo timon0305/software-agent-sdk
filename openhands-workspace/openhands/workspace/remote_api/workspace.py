@@ -219,15 +219,20 @@ class APIRemoteWorkspace(RemoteWorkspace):
         logger.info(f"Runtime {self._runtime_id} at {self._runtime_url}")
 
     def _resume_runtime(self) -> None:
-        """Resume a paused runtime."""
-        resp = self._send_api_request(
+        """Resume a paused runtime.
+
+        Note: Unlike _start_runtime(), the /resume endpoint returns a simple
+        success message rather than full runtime details. The runtime_id and
+        url are already known from the initial start, so we don't need to
+        parse the response.
+        """
+        self._send_api_request(
             "POST",
             f"{self.runtime_api_url}/resume",
             json={"runtime_id": self._runtime_id},
             timeout=self.init_timeout,
             headers=self._api_headers,
         )
-        self._parse_runtime_response(resp)
 
     def pause(self) -> None:
         """Pause the runtime to conserve resources.
