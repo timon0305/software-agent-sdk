@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from abc import ABC
+from copy import copy
 from typing import Annotated, Any, ClassVar, Literal, NoReturn, Self, Union
 
 from pydantic import (
@@ -13,7 +14,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from pydantic_core import ErrorDetails
+from pydantic_core import ErrorDetails, core_schema
 
 
 logger = logging.getLogger(__name__)
@@ -194,40 +195,49 @@ class DiscriminatedUnionMixin(OpenHandsModel, ABC):
     @classmethod
     def __get_pydantic_core_schema__(cls, source_type, handler):
         """Generate discriminated union schema for TypeAdapter compatibility."""
+        # Skip because this is called as part of class definition
         if cls.__name__ == "DiscriminatedUnionMixin":
             return handler(source_type)
 
-        if _is_abstract(source_type):
+        if not _is_abstract(source_type):
+            # A concrete class was loaded so we should rebuild to update the parent
             _rebuild_if_required()
+
+            # Concrete classes use the standard handler
+            return handler(source_type)
+
+        # Generate the base schema
+        serializable_type = source_type.get_serializable_type()
+        if serializable_type is source_type:
+            base_schema = handler(source_type)  # Prevent infinite recursion...
+        else:
+            base_schema = handler.generate_schema(serializable_type)
+
+        # Wrap it with a custom validation function that provides
+        # enhanced error messages
+        def validate_with_enhanced_error(value, handler_func, info):  # noqa: ARG001
             serializable_type = source_type.get_serializable_type()
-            # If there are subclasses, generate schema for the discriminated union
-            if serializable_type is not source_type:
-                from pydantic_core import core_schema
-
-                # Generate the base schema
-                base_schema = handler.generate_schema(serializable_type)
-
-                # Wrap it with a custom validation function that provides
-                # enhanced error messages
-                def validate_with_enhanced_error(value, handler_func, info):  # noqa: ARG001
-                    try:
-                        return handler_func(value)
-                    except ValidationError as e:
-                        valid_kinds = [
-                            subclass.__name__
-                            for subclass in get_known_concrete_subclasses(source_type)
-                        ]
-                        _handle_discriminated_union_validation_error(
-                            e, source_type.__name__, valid_kinds
-                        )
-
-                # Create a with_info_wrap_validator_function schema
-                return core_schema.with_info_wrap_validator_function(
-                    validate_with_enhanced_error,
-                    base_schema,
+            if serializable_type is source_type:
+                raise ValueError(
+                    f"No implementations loaded for: {source_type.__name__}. "
+                    "You may need to update your imports!"
+                )
+            try:
+                return handler_func(value)
+            except ValidationError as e:
+                valid_kinds = [
+                    subclass.__name__
+                    for subclass in get_known_concrete_subclasses(source_type)
+                ]
+                _handle_discriminated_union_validation_error(
+                    e, source_type.__name__, valid_kinds
                 )
 
-        return handler(source_type)
+        # Create a with_info_wrap_validator_function schema
+        return core_schema.with_info_wrap_validator_function(
+            validate_with_enhanced_error,
+            base_schema,
+        )
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
@@ -264,13 +274,18 @@ class DiscriminatedUnionMixin(OpenHandsModel, ABC):
         _parent_namespace_depth=2,
         _types_namespace=None,
     ):
-        if cls == DiscriminatedUnionMixin:
-            pass
-        if _is_abstract(cls):
+        if cls != DiscriminatedUnionMixin and _is_abstract(cls):
             subclasses = get_known_concrete_subclasses(cls)
             kinds = [subclass.__name__ for subclass in subclasses]
             if kinds:
-                kind_field = cls.model_fields["kind"]
+                # defensive copy because variable is shared between classes
+                model_fields = copy(cls.model_fields)
+                cls.model_fields = model_fields  # type: ignore
+
+                # defensive copy because variable is shared between classes
+                kind_field = copy(model_fields["kind"])
+                model_fields["kind"] = kind_field
+
                 kind_field.annotation = Literal[tuple(kinds)]  # type: ignore
                 kind_field.default = kinds[0]
 
