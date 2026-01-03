@@ -5,10 +5,13 @@ thinking blocks are forgotten. Tests that signature verification works correctly
 when earlier thinking blocks are condensed away while later ones remain.
 """
 
+from itertools import chain
+
 from openhands.sdk import get_logger
 from openhands.sdk.context.condenser import LLMSummarizingCondenser
 from openhands.sdk.event import ActionEvent
 from openhands.sdk.event.condenser import Condensation
+from openhands.sdk.llm.utils.model_features import get_features
 from openhands.sdk.tool import Tool, register_tool
 from openhands.tools.terminal import TerminalTool
 from tests.integration.base import BaseIntegrationTest, SkipTest, TestResult
@@ -47,20 +50,20 @@ class CondensationThinkingTest(BaseIntegrationTest):
     INSTRUCTION: str = INSTRUCTION
 
     def __init__(self, *args, **kwargs):
-        self.tool_loop_count = 0
-        self.condensation_count = 0
-        self.thinking_block_event_ids = []
+        self.thinking_block_events = []
         self.condensations = []
-        self.post_condensation_errors = []
+        
         super().__init__(*args, **kwargs)
 
-        from openhands.sdk.llm.utils.model_features import get_features
-
+        # Grab the model name so we can check features
         model_name = self.llm.model
         canonical = self.llm.model_info.get("model") if self.llm.model_info else None
         name = canonical or model_name or "unknown"
+        
         features = get_features(name)
 
+        # This test only works for models that generate thinking blocks, so skip
+        # otherwise
         supports_thinking = (
             features.supports_extended_thinking or features.supports_reasoning_effort
         )
@@ -82,10 +85,10 @@ class CondensationThinkingTest(BaseIntegrationTest):
         thinking block is forgotten while second is kept.
         """
         condenser_llm = self.llm.model_copy(update={"usage_id": "test-condenser-llm"})
+        
         return LLMSummarizingCondenser(
             llm=condenser_llm,
             max_size=10000,
-            max_tokens=100000,
             keep_first=1,
         )
 
@@ -97,50 +100,48 @@ class CondensationThinkingTest(BaseIntegrationTest):
         super().conversation_callback(event)
 
         if isinstance(event, ActionEvent) and event.thinking_blocks:
-            self.tool_loop_count += 1
-            self.thinking_block_event_ids.append(event.id)
-
+            self.thinking_block_events.append(event)
+            
         if isinstance(event, Condensation):
-            self.condensation_count += 1
             self.condensations.append(event)
 
     def setup(self) -> None:
         pass
 
     def verify_result(self) -> TestResult:
-        if self.tool_loop_count < 2:
+        # Sanity checks to ensure the flow worked the way we expected: at least three
+        # thinking blocks and one condensation
+        if len(self.thinking_block_events) < 3:
             return TestResult(
                 success=False,
-                reason=f"Expected 2+ thinking blocks, got {self.tool_loop_count}",
+                reason=(
+                    f"Expected at least 3 thinking blocks, got "
+                    f"{len(self.thinking_block_events)}"
+                ),
             )
-
-        if self.condensation_count == 0:
+        
+        if len(self.condensations) != 1:
             return TestResult(
                 success=False,
-                reason="Manual condensation was not triggered",
+                reason=(
+                    f"Expected exactly 1 condensation event, got "
+                    f"{len(self.condensations)}"
+                ),
             )
 
-        # Check that first thinking block was forgotten
-        first_thinking_forgotten = False
-        second_thinking_kept = True
+        # Check the conditions of the actual test. The condensation should forget the
+        # first thinking block but keep the second.
+        forgotten_event_ids = list(chain.from_iterable(
+            c.forgotten_event_ids for c in self.condensations
+        ))
 
-        if len(self.thinking_block_event_ids) >= 2:
-            first_thinking_id = self.thinking_block_event_ids[0]
-            second_thinking_id = self.thinking_block_event_ids[1]
-
-            for condensation in self.condensations:
-                if first_thinking_id in condensation.forgotten_event_ids:
-                    first_thinking_forgotten = True
-                if second_thinking_id in condensation.forgotten_event_ids:
-                    second_thinking_kept = False
-
-        if not first_thinking_forgotten:
+        if self.thinking_block_events[0].id not in forgotten_event_ids:
             return TestResult(
                 success=False,
                 reason="First thinking block was not forgotten during condensation",
             )
-
-        if not second_thinking_kept:
+        
+        if self.thinking_block_events[1].id in forgotten_event_ids:
             return TestResult(
                 success=False,
                 reason=(
@@ -149,16 +150,13 @@ class CondensationThinkingTest(BaseIntegrationTest):
                 ),
             )
 
-        if self.post_condensation_errors:
-            return TestResult(
-                success=False,
-                reason=f"Post-condensation errors: {self.post_condensation_errors}",
-            )
-
+        # In all other cases, if the test was successfully run without errors then it's
+        # a pass
         return TestResult(
             success=True,
             reason=(
-                f"Condensation successful with {self.tool_loop_count} thinking blocks"
+                f"Condensation successful with {len(self.thinking_block_events)} "
+                "thinking blocks"
             ),
         )
 
@@ -183,5 +181,8 @@ class CondensationThinkingTest(BaseIntegrationTest):
         self.conversation.run()
         
         # Send one more message to see if conversation can continue
-        self.conversation.send_message("What was the final compound interest result?")
+        self.conversation.send_message(
+            "Now run the commands again with 10% interest rate compounded annually."
+            " Show your reasoning and explain which method will yield a larger return."
+        )
         self.conversation.run()
