@@ -50,7 +50,7 @@ class CondensationThinkingTest(BaseIntegrationTest):
         self.tool_loop_count = 0
         self.condensation_count = 0
         self.thinking_block_event_ids = []
-        self.first_thinking_forgotten = False
+        self.condensations = []
         self.post_condensation_errors = []
         super().__init__(*args, **kwargs)
 
@@ -102,10 +102,7 @@ class CondensationThinkingTest(BaseIntegrationTest):
 
         if isinstance(event, Condensation):
             self.condensation_count += 1
-            if self.thinking_block_event_ids:
-                first_thinking_id = self.thinking_block_event_ids[0]
-                if first_thinking_id in event.forgotten_event_ids:
-                    self.first_thinking_forgotten = True
+            self.condensations.append(event)
 
     def setup(self) -> None:
         pass
@@ -123,10 +120,33 @@ class CondensationThinkingTest(BaseIntegrationTest):
                 reason="Manual condensation was not triggered",
             )
 
-        if not self.first_thinking_forgotten:
+        # Check that first thinking block was forgotten
+        first_thinking_forgotten = False
+        second_thinking_kept = True
+
+        if len(self.thinking_block_event_ids) >= 2:
+            first_thinking_id = self.thinking_block_event_ids[0]
+            second_thinking_id = self.thinking_block_event_ids[1]
+
+            for condensation in self.condensations:
+                if first_thinking_id in condensation.forgotten_event_ids:
+                    first_thinking_forgotten = True
+                if second_thinking_id in condensation.forgotten_event_ids:
+                    second_thinking_kept = False
+
+        if not first_thinking_forgotten:
             return TestResult(
                 success=False,
                 reason="First thinking block was not forgotten during condensation",
+            )
+
+        if not second_thinking_kept:
+            return TestResult(
+                success=False,
+                reason=(
+                    "Second thinking block was incorrectly forgotten during "
+                    "condensation"
+                ),
             )
 
         if self.post_condensation_errors:
@@ -148,26 +168,20 @@ class CondensationThinkingTest(BaseIntegrationTest):
         self.conversation.send_message(self.INSTRUCTION)
         self.conversation.run()
 
-        # If we only got one thinking block, send a follow-up to get another
-        if self.tool_loop_count < 2:
-            self.conversation.send_message(
-                "Now verify your calculations are correct by re-running the commands "
-                "and comparing the results. Show your reasoning about whether the "
-                "calculations match."
-            )
-            self.conversation.run()
+        # The agent should resolve the task with a single tool loop and just one
+        # thinking block
+
+        self.conversation.send_message(
+            "Now verify your calculations are correct by re-running the commands "
+            "and comparing the results. Show your reasoning about whether the "
+            "calculations match."
+        )
+        self.conversation.run()
 
         # Manually trigger condensation
-        try:
-            self.conversation.condense()
-        except Exception as e:
-            self.post_condensation_errors.append(str(e))
-
+        self.conversation.condense()
+        self.conversation.run()
+        
         # Send one more message to see if conversation can continue
-        try:
-            self.conversation.send_message(
-                "What was the final compound interest result?"
-            )
-            self.conversation.run()
-        except Exception as e:
-            self.post_condensation_errors.append(str(e))
+        self.conversation.send_message("What was the final compound interest result?")
+        self.conversation.run()
