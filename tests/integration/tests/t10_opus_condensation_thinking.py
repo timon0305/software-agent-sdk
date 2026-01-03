@@ -65,6 +65,8 @@ class CondensationThinkingTest(BaseIntegrationTest):
         self.condensation_count = 0
         self.condensation_request_count = 0
         self.post_condensation_errors = []
+        self.thinking_block_event_ids = []  # Track event IDs with thinking blocks
+        self.first_thinking_forgotten = False  # Track if first thinking block was forgotten
         super().__init__(*args, **kwargs)
 
         # This test requires models that support extended thinking or reasoning effort
@@ -122,9 +124,10 @@ class CondensationThinkingTest(BaseIntegrationTest):
         # Count thinking blocks in ActionEvents (tool calls with thinking)
         if isinstance(event, ActionEvent) and event.thinking_blocks:
             self.tool_loop_count += 1
+            self.thinking_block_event_ids.append(event.id)
             logger.info(
                 f"Tool loop #{self.tool_loop_count} with "
-                f"{len(event.thinking_blocks)} thinking blocks detected"
+                f"{len(event.thinking_blocks)} thinking blocks detected (event_id={event.id})"
             )
 
             # Mark when we've seen the second thinking block
@@ -139,7 +142,21 @@ class CondensationThinkingTest(BaseIntegrationTest):
         # Track condensation events
         if isinstance(event, Condensation):
             self.condensation_count += 1
-            logger.info(f"Condensation completed: {len(event.forgotten_event_ids)} events forgotten")
+            logger.info(f"Condensation #{self.condensation_count}: {len(event.forgotten_event_ids)} events forgotten")
+
+            # Check if the first thinking block event was forgotten
+            if self.thinking_block_event_ids:
+                first_thinking_id = self.thinking_block_event_ids[0]
+                if first_thinking_id in event.forgotten_event_ids:
+                    self.first_thinking_forgotten = True
+                    logger.info(f"  ✓ First thinking block (event_id={first_thinking_id}) WAS forgotten")
+                else:
+                    logger.info(f"  ✗ First thinking block (event_id={first_thinking_id}) was NOT forgotten")
+
+                # Log all thinking block events and their status
+                for i, tb_id in enumerate(self.thinking_block_event_ids, 1):
+                    status = "forgotten" if tb_id in event.forgotten_event_ids else "kept"
+                    logger.info(f"  Thinking block #{i} (event_id={tb_id}): {status}")
 
     def setup(self) -> None:
         """Log test configuration."""
@@ -155,6 +172,7 @@ class CondensationThinkingTest(BaseIntegrationTest):
         logger.info("TEST RESULTS:")
         logger.info(f"  Tool loops with thinking: {self.tool_loop_count}")
         logger.info(f"  Condensations completed: {self.condensation_count}")
+        logger.info(f"  First thinking block forgotten: {self.first_thinking_forgotten}")
         logger.info(f"  Post-condensation errors: {len(self.post_condensation_errors)}")
 
         # Check if we got the expected scenario
@@ -183,6 +201,16 @@ class CondensationThinkingTest(BaseIntegrationTest):
                 reason=(
                     "Manual condensation was not triggered. "
                     "Check if condenser is properly configured."
+                ),
+            )
+
+        # Check if the first thinking block was actually forgotten
+        if not self.first_thinking_forgotten:
+            return TestResult(
+                success=False,
+                reason=(
+                    "First thinking block was not forgotten during condensation. "
+                    "The test scenario is not properly set up to test the hypothesis."
                 ),
             )
 
