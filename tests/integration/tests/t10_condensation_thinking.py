@@ -1,14 +1,8 @@
-"""Test condensation with thinking blocks (Issue #1575).
+"""Test condensation with thinking blocks.
 
-This integration test reproduces the scenario described in issue #1575 where
-models with extended thinking/reasoning effort use thinking blocks across
-multiple tool loops, then condensation is manually triggered to test if
-signature verification fails.
-
-Hypothesis (csmith49): When condensation removes intermediate messages,
-signature verification may fail because signatures are computed against
-concatenated thinking tokens from previous turns. This was observed with
-Opus 4.5 but could affect other models with thinking capabilities.
+This integration test reproduces the scenario where models with extended
+thinking/reasoning effort use thinking blocks across multiple tool loops, then
+condensation is manually triggered to test if signature verification fails.
 
 This test verifies:
 1. The model produces multiple tool loops with thinking blocks
