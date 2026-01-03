@@ -16,6 +16,10 @@ This test verifies:
 3. Whether the conversation continues successfully or fails with signature errors
 """
 
+import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+
 from openhands.sdk import get_logger
 from openhands.sdk.context.condenser import LLMSummarizingCondenser
 from openhands.sdk.event import ActionEvent
@@ -214,43 +218,73 @@ class CondensationThinkingTest(BaseIntegrationTest):
         try:
             self.setup()
 
-            # Send the instruction and run until completion
-            self.conversation.send_message(self.INSTRUCTION)
-            logger.info("Starting initial conversation run...")
-            self.conversation.run()
+            # Initialize log file with header
+            with open(self.log_file_path, "w") as f:
+                f.write(f"Agent Logs for Test: {self.instance_id}\n")
+                f.write("=" * 50 + "\n\n")
 
-            # If we only got one thinking block, send a follow-up to get another
-            if self.tool_loop_count < 2:
-                logger.info(f"Got {self.tool_loop_count} thinking block(s), sending follow-up...")
-                self.conversation.send_message(
-                    "Now verify your calculations are correct by running the commands again "
-                    "and comparing the results. Show your reasoning about whether the "
-                    "calculations match."
-                )
+            # Capture stdout and stderr during conversation
+            stdout_buffer = StringIO()
+            stderr_buffer = StringIO()
+
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                # Send the instruction and run until completion
+                self.conversation.send_message(self.INSTRUCTION)
+                logger.info("Starting initial conversation run...")
                 self.conversation.run()
 
-            # If we still haven't detected second thinking block, we can't test condensation
-            if not self.second_thinking_detected:
-                logger.warning("Second thinking block never detected, continuing anyway...")
+                # If we only got one thinking block, send a follow-up to get another
+                if self.tool_loop_count < 2:
+                    logger.info(f"Got {self.tool_loop_count} thinking block(s), sending follow-up...")
+                    self.conversation.send_message(
+                        "Now verify your calculations are correct by running the commands again "
+                        "and comparing the results. Show your reasoning about whether the "
+                        "calculations match."
+                    )
+                    self.conversation.run()
 
-            # Manually trigger condensation
-            logger.info("MANUALLY TRIGGERING CONDENSATION")
-            try:
-                self.conversation.condense()
-                logger.info("✓ Manual condensation completed successfully")
-            except Exception as e:
-                logger.error(f"✗ Error during condensation: {e}")
-                self.post_condensation_errors.append(str(e))
+                # If we still haven't detected second thinking block, we can't test condensation
+                if not self.second_thinking_detected:
+                    logger.warning("Second thinking block never detected, continuing anyway...")
 
-            # Send one more message to see if conversation can continue after condensation
-            logger.info("Testing post-condensation behavior...")
-            try:
-                self.conversation.send_message("What was the final compound interest result?")
-                self.conversation.run()
-                logger.info("✓ Post-condensation conversation succeeded")
-            except Exception as e:
-                logger.error(f"✗ Error in post-condensation conversation: {e}")
-                self.post_condensation_errors.append(str(e))
+                # Manually trigger condensation
+                logger.info("MANUALLY TRIGGERING CONDENSATION")
+                try:
+                    self.conversation.condense()
+                    logger.info("✓ Manual condensation completed successfully")
+                except Exception as e:
+                    logger.error(f"✗ Error during condensation: {e}")
+                    self.post_condensation_errors.append(str(e))
+
+                # Send one more message to see if conversation can continue after condensation
+                logger.info("Testing post-condensation behavior...")
+                try:
+                    self.conversation.send_message("What was the final compound interest result?")
+                    self.conversation.run()
+                    logger.info("✓ Post-condensation conversation succeeded")
+                except Exception as e:
+                    logger.error(f"✗ Error in post-condensation conversation: {e}")
+                    self.post_condensation_errors.append(str(e))
+
+            # Save captured output to log file
+            captured_output = stdout_buffer.getvalue()
+            captured_errors = stderr_buffer.getvalue()
+
+            with open(self.log_file_path, "a") as f:
+                if captured_output:
+                    f.write("STDOUT:\n")
+                    f.write(captured_output)
+                    f.write("\n")
+                if captured_errors:
+                    f.write("STDERR:\n")
+                    f.write(captured_errors)
+                    f.write("\n")
+
+            # Also print to console for debugging
+            if captured_output:
+                print(captured_output, end="")
+            if captured_errors:
+                print(captured_errors, file=sys.stderr, end="")
 
             return self.verify_result()
 
