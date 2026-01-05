@@ -104,7 +104,9 @@ class RollingCondenser(PipelinableCondenserBase, ABC):
     """
 
     def hard_context_reset(
-        self, view: View, agent_llm: LLM | None = None  # noqa: ARG002
+        self,
+        view: View,  # noqa: ARG002
+        agent_llm: LLM | None = None,  # noqa: ARG002
     ) -> Condensation | None:
         """Perform a hard context reset, if supported by the condenser.
 
@@ -163,7 +165,7 @@ class RollingCondenser(PipelinableCondenserBase, ABC):
                     )
                     if hard_reset_condensation is not None:
                         return hard_reset_condensation
-                
+
                 # In all other situations re-raise the exception.
                 raise e
 
