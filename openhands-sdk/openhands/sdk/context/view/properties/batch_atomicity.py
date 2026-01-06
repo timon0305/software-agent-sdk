@@ -1,12 +1,8 @@
 """Property for ensuring ActionEvent batches remain atomic."""
 
-from collections import defaultdict
-from collections.abc import Sequence
-
 from openhands.sdk.context.view.manipulation_indices import ManipulationIndices
 from openhands.sdk.context.view.properties.base import ViewPropertyBase
 from openhands.sdk.event.base import Event, LLMConvertibleEvent
-from openhands.sdk.event.llm_convertible.action import ActionEvent
 from openhands.sdk.event.types import EventID
 
 
@@ -17,34 +13,6 @@ class BatchAtomicityProperty(ViewPropertyBase):
     are semantically related. If any one is forgotten (e.g., during condensation),
     all must be forgotten together to maintain consistency.
     """
-
-    @staticmethod
-    def _build_batches(events: Sequence[Event]) -> dict[EventID, list[EventID]]:
-        """Build mapping of llm_response_id to ActionEvent IDs.
-
-        Args:
-            events: Sequence of events to analyze
-
-        Returns:
-            Dictionary mapping llm_response_id to list of ActionEvent IDs
-        """
-        batches: dict[EventID, list[EventID]] = defaultdict(list)
-        for event in events:
-            if isinstance(event, ActionEvent):
-                batches[event.llm_response_id].append(event.id)
-        return dict(batches)
-
-    @staticmethod
-    def _build_event_id_to_index(events: Sequence[Event]) -> dict[EventID, int]:
-        """Build mapping of event ID to index.
-
-        Args:
-            events: Sequence of events to analyze
-
-        Returns:
-            Dictionary mapping event ID to index in the list
-        """
-        return {event.id: idx for idx, event in enumerate(events)}
 
     def enforce(
         self, current_view_events: list[LLMConvertibleEvent], all_events: list[Event]
