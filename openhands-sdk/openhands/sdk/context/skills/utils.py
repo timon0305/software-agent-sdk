@@ -270,6 +270,7 @@ def load_and_categorize(
     repo_skills: dict[str, Skill],
     knowledge_skills: dict[str, Skill],
     agent_skills: dict[str, Skill],
+    additional_resource_directories: list[str] | None = None,
 ) -> None:
     """Load a skill and categorize it.
 
@@ -281,11 +282,13 @@ def load_and_categorize(
         repo_skills: Dictionary for skills with trigger=None (permanent context).
         knowledge_skills: Dictionary for skills with triggers (progressive).
         agent_skills: Dictionary for AgentSkills standard SKILL.md files.
+        additional_resource_directories: Optional list of additional directory
+            names to scan for resources (e.g., ["examples"]).
     """
     # Import here to avoid circular dependency
     from openhands.sdk.context.skills.skill import Skill
 
-    skill = Skill.load(path, skill_base_dir)
+    skill = Skill.load(path, skill_base_dir, additional_resource_directories)
 
     # AgentSkills (SKILL.md directories) are a separate category from OpenHands skills.
     # They follow the AgentSkills standard and should be handled differently.
@@ -389,7 +392,10 @@ def update_skills_repository(
         return None
 
 
-def discover_skill_resources(skill_dir: Path) -> SkillResources:
+def discover_skill_resources(
+    skill_dir: Path,
+    additional_directories: list[str] | None = None,
+) -> SkillResources:
     """Discover resource directories in a skill directory.
 
     Scans for standard AgentSkills resource directories:
@@ -397,8 +403,13 @@ def discover_skill_resources(skill_dir: Path) -> SkillResources:
     - references/: Reference documentation
     - assets/: Static assets
 
+    Additional custom directories can be specified for plugin-specific
+    resources (e.g., examples/).
+
     Args:
         skill_dir: Path to the skill directory.
+        additional_directories: Optional list of additional directory names
+            to scan (e.g., ["examples"]).
 
     Returns:
         SkillResources with lists of files in each resource directory.
@@ -408,11 +419,20 @@ def discover_skill_resources(skill_dir: Path) -> SkillResources:
 
     resources = SkillResources(skill_root=str(skill_dir.resolve()))
 
+    # Scan standard directories
     for resource_type in RESOURCE_DIRECTORIES:
         resource_dir = skill_dir / resource_type
         if resource_dir.is_dir():
             files = _list_resource_files(resource_dir, resource_type)
             setattr(resources, resource_type, files)
+
+    # Scan additional custom directories
+    if additional_directories:
+        for dir_name in additional_directories:
+            resource_dir = skill_dir / dir_name
+            if resource_dir.is_dir():
+                files = _list_resource_files(resource_dir, dir_name)
+                resources.additional[dir_name] = files
 
     return resources
 

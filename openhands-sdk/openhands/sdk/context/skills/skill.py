@@ -43,6 +43,9 @@ class SkillResources(BaseModel):
     - scripts/: Executable scripts the agent can run
     - references/: Reference documentation and examples
     - assets/: Static assets (images, data files, etc.)
+
+    Additional custom directories can be specified via the `additional`
+    field for plugin-specific resources (e.g., examples/).
     """
 
     skill_root: str = Field(description="Root directory of the skill (absolute path)")
@@ -58,10 +61,15 @@ class SkillResources(BaseModel):
         default_factory=list,
         description="List of asset files in assets/ directory (relative paths)",
     )
+    additional: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Additional custom resource directories",
+    )
 
     def has_resources(self) -> bool:
         """Check if any resources are available."""
-        return bool(self.scripts or self.references or self.assets)
+        has_additional = any(files for files in self.additional.values())
+        return bool(self.scripts or self.references or self.assets or has_additional)
 
     def get_scripts_dir(self) -> Path | None:
         """Get the scripts directory path if it exists."""
@@ -77,6 +85,13 @@ class SkillResources(BaseModel):
         """Get the assets directory path if it exists."""
         assets_dir = Path(self.skill_root) / "assets"
         return assets_dir if assets_dir.is_dir() else None
+
+    def get_additional_dir(self, name: str) -> Path | None:
+        """Get a custom resource directory path if it exists."""
+        if name not in self.additional:
+            return None
+        custom_dir = Path(self.skill_root) / name
+        return custom_dir if custom_dir.is_dir() else None
 
 
 # Union type for all trigger types
@@ -222,6 +237,7 @@ class Skill(BaseModel):
         cls,
         path: str | Path,
         skill_base_dir: Path | None = None,
+        additional_resource_directories: list[str] | None = None,
     ) -> "Skill":
         """Load a skill from a markdown file with frontmatter.
 
@@ -234,6 +250,8 @@ class Skill(BaseModel):
         Args:
             path: Path to the skill file.
             skill_base_dir: Base directory for skills (used to derive relative names).
+            additional_resource_directories: Optional list of additional directory
+                names to scan for resources (e.g., ["examples"]).
         """
         path = Path(path) if isinstance(path, str) else path
 
@@ -241,17 +259,26 @@ class Skill(BaseModel):
             file_content = f.read()
 
         if path.name.lower() == "skill.md":
-            return cls._load_agentskills_skill(path, file_content)
+            return cls._load_agentskills_skill(
+                path, file_content, additional_resource_directories
+            )
         else:
             return cls._load_legacy_openhands_skill(path, file_content, skill_base_dir)
 
     @classmethod
-    def _load_agentskills_skill(cls, path: Path, file_content: str) -> "Skill":
+    def _load_agentskills_skill(
+        cls,
+        path: Path,
+        file_content: str,
+        additional_resource_directories: list[str] | None = None,
+    ) -> "Skill":
         """Load a skill from an AgentSkills-format SKILL.md file.
 
         Args:
             path: Path to the SKILL.md file.
             file_content: Content of the file.
+            additional_resource_directories: Optional list of additional directory
+                names to scan for resources (e.g., ["examples"]).
         """
         # For SKILL.md files, use parent directory name as the skill name
         directory_name = path.parent.name
@@ -280,7 +307,9 @@ class Skill(BaseModel):
 
         # Discover resource directories
         resources: SkillResources | None = None
-        discovered_resources = discover_skill_resources(skill_root)
+        discovered_resources = discover_skill_resources(
+            skill_root, additional_resource_directories
+        )
         if discovered_resources.has_resources():
             resources = discovered_resources
 
@@ -518,6 +547,7 @@ class Skill(BaseModel):
 
 def load_skills_from_dir(
     skill_dir: str | Path,
+    additional_resource_directories: list[str] | None = None,
 ) -> tuple[dict[str, Skill], dict[str, Skill], dict[str, Skill]]:
     """Load all skills from the given directory.
 
@@ -529,6 +559,8 @@ def load_skills_from_dir(
 
     Args:
         skill_dir: Path to the skills directory (e.g. .openhands/skills)
+        additional_resource_directories: Optional list of additional directory
+            names to scan for resources (e.g., ["examples"]).
 
     Returns:
         Tuple of (repo_skills, knowledge_skills, agent_skills) dictionaries.
@@ -556,19 +588,34 @@ def load_skills_from_dir(
     # Load third-party files
     for path in third_party_files:
         load_and_categorize(
-            path, skill_dir, repo_skills, knowledge_skills, agent_skills
+            path,
+            skill_dir,
+            repo_skills,
+            knowledge_skills,
+            agent_skills,
+            additional_resource_directories,
         )
 
     # Load SKILL.md files (auto-detected and validated in Skill.load)
     for skill_md_path in skill_md_files:
         load_and_categorize(
-            skill_md_path, skill_dir, repo_skills, knowledge_skills, agent_skills
+            skill_md_path,
+            skill_dir,
+            repo_skills,
+            knowledge_skills,
+            agent_skills,
+            additional_resource_directories,
         )
 
     # Load regular .md files
     for path in regular_md_files:
         load_and_categorize(
-            path, skill_dir, repo_skills, knowledge_skills, agent_skills
+            path,
+            skill_dir,
+            repo_skills,
+            knowledge_skills,
+            agent_skills,
+            additional_resource_directories,
         )
 
     total = len(repo_skills) + len(knowledge_skills) + len(agent_skills)
