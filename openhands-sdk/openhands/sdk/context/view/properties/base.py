@@ -6,8 +6,19 @@ from openhands.sdk.event.base import LLMConvertibleEvent
 from openhands.sdk.event.types import EventID
 
 
-class Property(ABC):
-    """Abstract base class for properties of a view."""
+class ViewPropertyBase(ABC):
+    """Abstract base class for properties of a view.
+    
+    Properties define rules that help maintain the integrity and coherence of the events
+    in the view. The properties are maintained via two strategies:
+    
+    1. Enforcing the property by removing events that violate it.
+    2. Defining manipulation indices that restrict where the view can be manipulated.
+
+    In an ideal scenario, sticking to the manipulation indices should suffice to ensure
+    the property holds. Enforcement is only intended as a fallback mechanism to handle
+    edge cases, bad data, or unforeseen situations.
+    """
 
     @abstractmethod
     def enforce(
