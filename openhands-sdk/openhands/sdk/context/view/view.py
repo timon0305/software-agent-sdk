@@ -8,6 +8,7 @@ from typing import overload
 from pydantic import BaseModel, computed_field
 
 from openhands.sdk.context.view.event_mappings import EventMappings
+from openhands.sdk.context.view.manipulation_indices import ManipulationIndices
 from openhands.sdk.event import (
     Condensation,
     CondensationRequest,
@@ -70,9 +71,9 @@ class View(BaseModel):
                 return event
         return None
 
-    @computed_field  # type: ignore[prop-decorator]
+    @computed_field(return_type=set[int])  # type: ignore[prop-decorator]
     @cached_property
-    def manipulation_indices(self) -> set[int]:
+    def manipulation_indices(self) -> ManipulationIndices:
         """Return cached manipulation indices for this view's events.
 
         These indices represent boundaries between atomic units where events can be
@@ -95,11 +96,11 @@ class View(BaseModel):
         - events[indices[i]:indices[i+1]] is an atomic unit
 
         Returns:
-            Set of indices representing atomic unit boundaries. Always
-            includes 0 and len(events) as boundaries.
+            ManipulationIndices (set of int) representing atomic unit boundaries.
+            Always includes 0 and len(events) as boundaries.
         """
         if not self.events:
-            return {0}
+            return ManipulationIndices({0})
 
         mappings = EventMappings.from_events(self.events)
 
@@ -217,7 +218,7 @@ class View(BaseModel):
             for idx in range(min_idx + 1, max_idx + 1):
                 result_indices.discard(idx)
 
-        return result_indices
+        return ManipulationIndices(result_indices)
 
     # To preserve list-like indexing, we ideally support slicing and position-based
     # indexing. The only challenge with that is switching the return type based on the
@@ -355,16 +356,7 @@ class View(BaseModel):
             The smallest manipulation index that satisfies the condition, or the
             threshold itself if no such index exists
         """
-        if strict:
-            valid_indices = [
-                idx for idx in self.manipulation_indices if idx > threshold
-            ]
-        else:
-            valid_indices = [
-                idx for idx in self.manipulation_indices if idx >= threshold
-            ]
-
-        return min(valid_indices) if valid_indices else threshold
+        return self.manipulation_indices.find_next(threshold, strict)
 
     @staticmethod
     def from_events(events: Sequence[Event]) -> View:
