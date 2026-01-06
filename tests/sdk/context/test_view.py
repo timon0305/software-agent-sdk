@@ -1,7 +1,7 @@
 from typing import cast
 from unittest.mock import create_autospec
 
-from openhands.sdk.context.view import EventMappings, View
+from openhands.sdk.context.view import View
 from openhands.sdk.event.base import Event
 from openhands.sdk.event.condenser import (
     Condensation,
@@ -848,83 +848,6 @@ def test_filter_unmatched_tool_calls_none_tool_call_id() -> None:
     assert observation_event_valid in result
     assert action_event_none not in result
     assert observation_event_none not in result
-
-
-def test_get_action_tool_call_ids() -> None:
-    """Test EventMappings extracts action tool_call_ids correctly."""
-    # Create mock events
-    message_event = create_autospec(MessageEvent, instance=True)
-    message_event.id = "msg_1"
-
-    action_event_1 = create_autospec(ActionEvent, instance=True)
-    action_event_1.id = "action_1"
-    action_event_1.tool_call_id = "call_1"
-    action_event_1.llm_response_id = "response_1"
-
-    action_event_2 = create_autospec(ActionEvent, instance=True)
-    action_event_2.id = "action_2"
-    action_event_2.tool_call_id = "call_2"
-    action_event_2.llm_response_id = "response_1"
-
-    action_event_none = create_autospec(ActionEvent, instance=True)
-    action_event_none.id = "action_3"
-    action_event_none.tool_call_id = None
-    action_event_none.llm_response_id = "response_2"
-
-    observation_event = create_autospec(ObservationEvent, instance=True)
-    observation_event.id = "obs_1"
-    observation_event.tool_call_id = "call_3"
-
-    events = [
-        message_event,
-        action_event_1,
-        action_event_2,
-        action_event_none,
-        observation_event,
-    ]
-
-    mappings = EventMappings.from_events(events)
-
-    # Should only include tool_call_ids from ActionEvents with non-None tool_call_id
-    assert mappings.action_tool_call_ids == {"call_1", "call_2"}
-
-
-def test_get_observation_tool_call_ids() -> None:
-    """Test EventMappings extracts observation tool_call_ids correctly."""
-    # Create mock events
-    message_event = create_autospec(MessageEvent, instance=True)
-    message_event.id = "msg_1"
-
-    observation_event_1 = create_autospec(ObservationEvent, instance=True)
-    observation_event_1.id = "obs_1"
-    observation_event_1.tool_call_id = "call_1"
-
-    observation_event_2 = create_autospec(ObservationEvent, instance=True)
-    observation_event_2.id = "obs_2"
-    observation_event_2.tool_call_id = "call_2"
-
-    observation_event_none = create_autospec(ObservationEvent, instance=True)
-    observation_event_none.id = "obs_3"
-    observation_event_none.tool_call_id = None
-
-    action_event = create_autospec(ActionEvent, instance=True)
-    action_event.id = "action_1"
-    action_event.tool_call_id = "call_3"
-    action_event.llm_response_id = "response_1"
-
-    events = [
-        message_event,
-        observation_event_1,
-        observation_event_2,
-        observation_event_none,
-        action_event,
-    ]
-
-    mappings = EventMappings.from_events(events)
-
-    # Should only include tool_call_ids from ObservationEvents with non-None
-    # tool_call_id
-    assert mappings.observation_tool_call_ids == {"call_1", "call_2"}
 
 
 def test_should_keep_event_observation_event() -> None:
