@@ -21,8 +21,24 @@ from openhands.sdk.llm import LLM
 from openhands.sdk.llm.utils.model_prompt_spec import get_model_prompt_spec
 from openhands.sdk.logger import get_logger
 from openhands.sdk.mcp import create_mcp_tools
-from openhands.sdk.tool import BUILT_IN_TOOLS, Tool, ToolDefinition, resolve_tool
+from openhands.sdk.tool import (
+    BUILT_IN_TOOLS,
+    FinishTool,
+    ThinkTool,
+    Tool,
+    ToolDefinition,
+    resolve_tool,
+)
 from openhands.sdk.utils.models import DiscriminatedUnionMixin
+
+
+# Explicit mapping of built-in tool class names to their classes.
+# This is more reliable than using resolve_kind() which depends on
+# subclass discovery and may fail if classes haven't been imported.
+BUILT_IN_TOOL_CLASSES: dict[str, type[ToolDefinition]] = {
+    "FinishTool": FinishTool,
+    "ThinkTool": ThinkTool,
+}
 
 
 if TYPE_CHECKING:
@@ -176,7 +192,7 @@ class AgentBase(DiscriminatedUnionMixin, ABC):
     @field_validator("include_default_tools", mode="before")
     @classmethod
     def _val_include_default_tools(cls, v: Any) -> list[str]:
-        """Convert tool classes to their class names if needed.
+        """Convert tool classes to their class names and validate them.
 
         Accepts both strings and tool classes for backward compatibility.
         """
@@ -185,12 +201,19 @@ class AgentBase(DiscriminatedUnionMixin, ABC):
         result: list[str] = []
         for item in v:
             if isinstance(item, str):
-                result.append(item)
+                name = item
             elif isinstance(item, type):
-                # It's a tool class
-                result.append(item.__name__)
+                # It's a tool class - convert to name
+                name = item.__name__
             else:
                 raise ValueError(f"Invalid item type: {type(item)}")
+            # Validate that the tool name is a known built-in tool
+            if name not in BUILT_IN_TOOL_CLASSES:
+                raise ValueError(
+                    f"Unknown built-in tool class: '{name}'. "
+                    f"Expected one of: {list(BUILT_IN_TOOL_CLASSES.keys())}"
+                )
+            result.append(name)
         return result
 
     @property
@@ -293,9 +316,14 @@ class AgentBase(DiscriminatedUnionMixin, ABC):
             )
 
         # Include default tools from include_default_tools; not subject to regex
-        # filtering. Resolve tool class names and instantiate using their .create()
+        # filtering. Use explicit mapping to resolve tool class names.
         for tool_name in self.include_default_tools:
-            tool_class = ToolDefinition.resolve_kind(tool_name)
+            tool_class = BUILT_IN_TOOL_CLASSES.get(tool_name)
+            if tool_class is None:
+                raise ValueError(
+                    f"Unknown built-in tool class: '{tool_name}'. "
+                    f"Expected one of: {list(BUILT_IN_TOOL_CLASSES.keys())}"
+                )
             tool_instances = tool_class.create(state)
             tools.extend(tool_instances)
 
