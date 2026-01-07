@@ -23,11 +23,6 @@ from openhands.sdk.event import (
     LLMConvertibleEvent,
 )
 from openhands.sdk.event.base import Event, EventID
-from openhands.sdk.event.llm_convertible import (
-    ActionEvent,
-    ObservationBaseEvent,
-)
-from openhands.sdk.event.types import ToolCallID
 
 
 logger = getLogger(__name__)
@@ -81,15 +76,7 @@ class View(BaseModel):
         return None
 
     manipulation_indices: ManipulationIndices = Field(
-        description=(
-            "Manipulation indices for this view's events. "
-            "These indices represent boundaries between atomic units where events can be "
-            "safely manipulated (inserted or forgotten). An atomic unit is either: "
-            "a tool loop (sequence of batches starting with thinking blocks), "
-            "a batch of ActionEvents with the same llm_response_id, or "
-            "a single event that is neither an ActionEvent nor an ObservationBaseEvent. "
-            "Always includes 0 and len(events) as boundaries."
-        )
+        description=("Manipulation indices for this view's events. ")
     )
 
     # To preserve list-like indexing, we ideally support slicing and position-based
@@ -204,10 +191,22 @@ class View(BaseModel):
         )
 
     @staticmethod
-    def from_events(events: Sequence[Event]) -> View:
-        """Create a view from a list of events, respecting the semantics of any
-        condensation events.
-        """
+    def _unhandled_condensation_request(
+        events: Sequence[Event],
+    ) -> bool:
+        """Check for an unhandled condensation request in the event list."""
+        for event in reversed(events):
+            if isinstance(event, Condensation):
+                return False
+            if isinstance(event, CondensationRequest):
+                return True
+        return False
+
+    @staticmethod
+    def _apply_condensations(
+        events: Sequence[Event],
+    ) -> tuple[list[LLMConvertibleEvent], list[Condensation]]:
+        """Apply condensations to the event list, removing forgotten events."""
         forgotten_event_ids: set[EventID] = set()
         condensations: list[Condensation] = []
         for event in events:
@@ -244,18 +243,18 @@ class View(BaseModel):
 
             _new_summary_event = CondensationSummaryEvent(summary=summary)
             kept_events.insert(summary_offset, _new_summary_event)
+        return kept_events, condensations
+
+    @staticmethod
+    def from_events(events: Sequence[Event]) -> View:
+        """Create a view from a list of events, respecting the semantics of any
+        condensation events.
+        """
+        kept_events, condensations = View._apply_condensations(events)
 
         # Check for an unhandled condensation request -- these are events closer to the
         # end of the list than any condensation action.
-        unhandled_condensation_request = False
-
-        for event in reversed(events):
-            if isinstance(event, Condensation):
-                break
-
-            if isinstance(event, CondensationRequest):
-                unhandled_condensation_request = True
-                break
+        unhandled_condensation_request = View._unhandled_condensation_request(events)
 
         # Define view properties for enforcement and manipulation indices
         properties = [
