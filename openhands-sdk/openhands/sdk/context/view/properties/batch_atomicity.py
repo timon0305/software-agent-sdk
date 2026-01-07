@@ -53,7 +53,8 @@ class BatchAtomicityProperty(ViewPropertyBase):
         """Calculate manipulation indices that respect batch atomicity.
 
         Returns all indices outside of batch ranges. Within a batch (from min to max
-        index), no manipulation is allowed.
+        index), no manipulation is allowed. The range includes all actions in the batch
+        and their corresponding observations.
 
         Args:
             current_view_events: Events currently in the view
@@ -62,19 +63,35 @@ class BatchAtomicityProperty(ViewPropertyBase):
         Returns:
             ManipulationIndices with all valid manipulation points
         """
+        from openhands.sdk.event.llm_convertible import ActionEvent, ObservationBaseEvent
+
         batches = self._build_batches(current_view_events)
         event_id_to_index = self._build_event_id_to_index(current_view_events)
+
+        # Build tool_call_id to observation mapping
+        tool_call_to_obs_idx: dict[str, int] = {}
+        for idx, event in enumerate(current_view_events):
+            if isinstance(event, ObservationBaseEvent) and event.tool_call_id:
+                tool_call_to_obs_idx[event.tool_call_id] = idx
 
         # Find atomic ranges for each batch
         atomic_ranges: list[tuple[int, int]] = []
 
         for llm_response_id, action_ids in batches.items():
-            if len(action_ids) > 1:
-                # Get indices for all actions in this batch
-                indices = [event_id_to_index[aid] for aid in action_ids]
-                min_idx = min(indices)
-                max_idx = max(indices)
-                atomic_ranges.append((min_idx, max_idx))
+            # Get indices for all actions in this batch
+            indices = [event_id_to_index[aid] for aid in action_ids]
+            min_idx = min(indices)
+            max_idx = max(indices)
+
+            # Extend max_idx to include all corresponding observations
+            for action_id in action_ids:
+                action_event = current_view_events[event_id_to_index[action_id]]
+                if isinstance(action_event, ActionEvent) and action_event.tool_call_id:
+                    obs_idx = tool_call_to_obs_idx.get(action_event.tool_call_id)
+                    if obs_idx is not None:
+                        max_idx = max(max_idx, obs_idx)
+
+            atomic_ranges.append((min_idx, max_idx))
 
         # Build set of all valid manipulation indices
         # We can manipulate at any index not inside an atomic range

@@ -263,10 +263,11 @@ def test_manipulation_indices_interleaved_batch() -> None:
     prop = BatchAtomicityProperty()
     indices = prop.manipulation_indices(events, events)
 
-    # Batch spans from index 0 (action1) to index 2 (action2)
-    # Can't manipulate at indices 1, 2 (within the batch range)
-    # Can manipulate at 0 (before), 3 (after action2), 4 (end)
-    assert indices == {0, 3, 4}
+    # Batch spans from index 0 (action1) to index 3 (obs2, last observation)
+    # The batch now includes observations, so the range extends to the last observation
+    # Can't manipulate at indices 1, 2, 3 (within the batch range including observations)
+    # Can manipulate at 0 (before), 4 (end)
+    assert indices == {0, 4}
 
 
 def test_manipulation_indices_multiple_batches() -> None:
@@ -327,7 +328,7 @@ def test_manipulation_indices_non_consecutive_batch() -> None:
 
 
 def test_manipulation_indices_only_single_action_batches() -> None:
-    """Test that single-action batches don't restrict indices."""
+    """Test that single-action batches without observations don't restrict indices."""
     action1 = create_action_event("response_1", "call_1")
     action2 = create_action_event("response_2", "call_2")
     action3 = create_action_event("response_3", "call_3")
@@ -337,7 +338,8 @@ def test_manipulation_indices_only_single_action_batches() -> None:
     prop = BatchAtomicityProperty()
     indices = prop.manipulation_indices(events, events)
 
-    # All single-action batches, so can manipulate anywhere
+    # All single-action batches without observations, so can manipulate anywhere
+    # Each batch is just a single action with no observation to extend to
     assert indices == {0, 1, 2, 3}
 
 
@@ -364,9 +366,9 @@ def test_manipulation_indices_complex_scenario() -> None:
     indices = prop.manipulation_indices(events, events)
 
     # msg1: 0
-    # batch1: 1-3 (can't manipulate at 2, 3)
-    # obs1: 4
+    # batch1: 1-4 (includes actions 1-3 and obs1 at index 4)
     # msg2: 5
-    # batch2: 6-7 (can't manipulate at 7)
+    # batch2: 6-7 (no observations, so just actions)
     # end: 8
-    assert indices == {0, 1, 4, 5, 6, 8}
+    # Can manipulate at: 0, 1 (before batch1), 5 (between batches), 6 (before batch2), 8 (end)
+    assert indices == {0, 1, 5, 6, 8}
