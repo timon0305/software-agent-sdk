@@ -78,13 +78,19 @@ async def events_socket(
                 await event_service.send_message(message, True)
             except WebSocketDisconnect:
                 logger.info(f"Event websocket disconnected: {conversation_id}")
-                # Exit the loop when websocket disconnects
+                # Exit the loop when websocket disconnects - this is normal behavior
+                # and should NOT trigger server shutdown
                 return
             except Exception as e:
                 logger.exception("error_in_subscription", stack_info=True)
-                # For critical errors that indicate the websocket is broken, exit
+                # For critical errors that indicate the websocket is broken,
+                # exit gracefully without re-raising to avoid server shutdown
                 if isinstance(e, (RuntimeError, ConnectionError)):
-                    raise
+                    logger.warning(
+                        f"WebSocket connection error for {conversation_id}, "
+                        "closing connection gracefully"
+                    )
+                    return
                 # For other exceptions, continue the loop
     finally:
         await event_service.unsubscribe_from_events(subscriber_id)
@@ -124,14 +130,19 @@ async def bash_events_socket(
                 request = ExecuteBashRequest.model_validate(data)
                 await bash_event_service.start_bash_command(request)
             except WebSocketDisconnect:
-                # Exit the loop when websocket disconnects
+                # Exit the loop when websocket disconnects - this is normal behavior
+                # and should NOT trigger server shutdown
                 logger.info("Bash websocket disconnected")
                 return
             except Exception as e:
                 logger.exception("error_in_bash_event_subscription", stack_info=True)
-                # For critical errors that indicate the websocket is broken, exit
+                # For critical errors that indicate the websocket is broken,
+                # exit gracefully without re-raising to avoid server shutdown
                 if isinstance(e, (RuntimeError, ConnectionError)):
-                    raise
+                    logger.warning(
+                        "Bash WebSocket connection error, closing connection gracefully"
+                    )
+                    return
                 # For other exceptions, continue the loop
     finally:
         await bash_event_service.unsubscribe_from_events(subscriber_id)

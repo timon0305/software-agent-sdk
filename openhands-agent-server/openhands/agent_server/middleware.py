@@ -1,7 +1,12 @@
 from urllib.parse import urlparse
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.types import ASGIApp
+
+from openhands.agent_server.server_details_router import update_last_execution_time
 
 
 class LocalhostCORSMiddleware(CORSMiddleware):
@@ -30,3 +35,21 @@ class LocalhostCORSMiddleware(CORSMiddleware):
         # For missing origin or other origins, use the parent class's logic
         result: bool = super().is_allowed_origin(origin)
         return result
+
+
+class ActivityTrackingMiddleware(BaseHTTPMiddleware):
+    """Middleware that tracks HTTP request activity for idle detection.
+
+    This middleware updates the last activity timestamp on every HTTP request,
+    ensuring that the runtime-api can accurately detect when the server is
+    actually idle vs actively serving requests.
+
+    This fixes the issue where runtime-api would kill active runtimes because
+    it only tracked its own API calls, not the actual HTTP traffic to the pods.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[type-arg]
+        # Update activity timestamp before processing the request
+        update_last_execution_time()
+        response = await call_next(request)
+        return response

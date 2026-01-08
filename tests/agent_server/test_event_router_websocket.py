@@ -231,7 +231,11 @@ class TestWebSocketDisconnectHandling:
     async def test_websocket_unsubscribe_in_finally_when_no_disconnect(
         self, mock_websocket, mock_event_service, sample_conversation_id
     ):
-        """Test that unsubscription happens in finally block when no disconnect."""
+        """Test that unsubscription happens in finally block when RuntimeError occurs.
+
+        RuntimeError is now handled gracefully (no exception raised) to avoid
+        server shutdown, but cleanup should still happen.
+        """
         # Simulate a different kind of exception that doesn't trigger disconnect handler
         mock_websocket.receive_json.side_effect = RuntimeError("Unexpected error")
 
@@ -249,11 +253,11 @@ class TestWebSocketDisconnectHandling:
 
             from openhands.agent_server.sockets import events_socket
 
-            # This should raise the RuntimeError but still clean up
-            with pytest.raises(RuntimeError):
-                await events_socket(
-                    sample_conversation_id, mock_websocket, session_api_key=None
-                )
+            # RuntimeError is now handled gracefully (no exception raised)
+            # to avoid server shutdown when websocket connection errors occur
+            await events_socket(
+                sample_conversation_id, mock_websocket, session_api_key=None
+            )
 
         # Should still unsubscribe in the finally block
         mock_event_service.unsubscribe_from_events.assert_called_once()
