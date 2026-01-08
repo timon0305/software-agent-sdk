@@ -1,7 +1,12 @@
 from urllib.parse import urlparse
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.types import ASGIApp
+
+from openhands.agent_server.server_details_router import update_last_execution_time
 
 
 class LocalhostCORSMiddleware(CORSMiddleware):
@@ -30,3 +35,17 @@ class LocalhostCORSMiddleware(CORSMiddleware):
         # For missing origin or other origins, use the parent class's logic
         result: bool = super().is_allowed_origin(origin)
         return result
+
+
+class ActivityTrackingMiddleware(BaseHTTPMiddleware):
+    """Middleware that tracks HTTP request activity for idle detection.
+
+    Updates the last activity timestamp on every HTTP request, ensuring that
+    external systems querying /server_info can accurately determine whether
+    the server is idle or actively serving requests.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:  # type: ignore[type-arg]
+        update_last_execution_time()
+        response = await call_next(request)
+        return response

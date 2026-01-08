@@ -23,7 +23,10 @@ from openhands.agent_server.desktop_service import get_desktop_service
 from openhands.agent_server.event_router import event_router
 from openhands.agent_server.file_router import file_router
 from openhands.agent_server.git_router import git_router
-from openhands.agent_server.middleware import LocalhostCORSMiddleware
+from openhands.agent_server.middleware import (
+    ActivityTrackingMiddleware,
+    LocalhostCORSMiddleware,
+)
 from openhands.agent_server.server_details_router import (
     get_server_info,
     server_details_router,
@@ -322,6 +325,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     _add_api_routes(app, config)
     _setup_static_files(app, config)
     app.add_middleware(LocalhostCORSMiddleware, allow_origins=config.allow_cors_origins)
+    # Track activity on every HTTP request for accurate idle detection
+    app.add_middleware(ActivityTrackingMiddleware)
     _add_exception_handlers(app)
 
     return app
