@@ -32,6 +32,9 @@ jobs:
             (github.event.action == 'ready_for_review' && github.event.pull_request.author_association != 'FIRST_TIME_CONTRIBUTOR') ||
             github.event.label.name == 'review-this' ||
             github.event.requested_reviewer.login == 'openhands-agent'
+        concurrency:
+            group: pr-review-${{ github.event.pull_request.number }}
+            cancel-in-progress: true
         runs-on: blacksmith-4vcpu-ubuntu-2404
         env:
             LLM_MODEL: litellm_proxy/claude-sonnet-4-5-20250929
