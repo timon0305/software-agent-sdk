@@ -184,15 +184,24 @@ class Agent(AgentBase):
                 on_token=on_token,
             )
         except FunctionCallValidationError as e:
+            # The LLM produced a tool call that can't be parsed/validated at the
+            # function-call conversion layer.
+            #
+            # Historically we injected a synthetic *user* message containing the
+            # raw error string. That message is not tied to any tool_call_id, and
+            # many models will not treat it as actionable feedback.
+            #
+            # Instead, emit an AgentErrorEvent so it is serialized as a proper
+            # tool-role message and fed back to the LLM on the next step, allowing
+            # it to correct the tool call.
             logger.warning(f"LLM generated malformed function call: {e}")
-            error_message = MessageEvent(
-                source="user",
-                llm_message=Message(
-                    role="user",
-                    content=[TextContent(text=str(e))],
-                ),
+            on_event(
+                AgentErrorEvent(
+                    error=str(e),
+                    tool_name="function_call",
+                    tool_call_id="validation_error",
+                )
             )
-            on_event(error_message)
             return
         except LLMContextWindowExceedError as e:
             # If condenser is available and handles requests, trigger condensation
