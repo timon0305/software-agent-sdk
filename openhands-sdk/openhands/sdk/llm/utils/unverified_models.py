@@ -95,12 +95,15 @@ def _get_litellm_provider_names() -> set[str]:
         return set()
 
     result: set[str] = set()
+
+    # LiteLLM exports this as a list of enum members (litellm.types.utils.LlmProviders)
+    # whose `.value` is the provider name.
     for p in provider_list:
-        value = getattr(p, "value", None)
-        if isinstance(value, str) and value:
-            result.add(value)
-        elif isinstance(p, str) and p:
-            result.add(p)
+        if isinstance(p, str):
+            if p:
+                result.add(p)
+        else:
+            result.add(p.value)
 
     return result
 
