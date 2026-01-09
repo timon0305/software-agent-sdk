@@ -86,6 +86,25 @@ class Plugin(BaseModel):
         """Get the plugin description."""
         return self.manifest.description
 
+    def get_all_skills(self) -> list[Skill]:
+        """Get all skills including those converted from commands.
+
+        Returns skills from both the skills/ directory and commands/ directory.
+        Commands are converted to keyword-triggered skills using the format
+        /<plugin-name>:<command-name>.
+
+        Returns:
+            Combined list of skills (original + command-derived skills).
+        """
+        all_skills = list(self.skills)
+
+        # Convert commands to skills with keyword triggers
+        for command in self.commands:
+            skill = command.to_skill(self.name)
+            all_skills.append(skill)
+
+        return all_skills
+
     def merge_into(
         self,
         agent_context: AgentContext | None = None,
@@ -95,7 +114,8 @@ class Plugin(BaseModel):
         """Merge this plugin's content into agent context and MCP config.
 
         This is the canonical way to apply a plugin's skills and MCP configuration
-        to an agent's runtime context.
+        to an agent's runtime context. Includes both explicit skills and
+        command-derived skills.
 
         Args:
             agent_context: Existing agent context (or None)
@@ -119,8 +139,11 @@ class Plugin(BaseModel):
             ...     update={"agent_context": new_context, "mcp_config": new_mcp}
             ... )
         """
+        # Get all skills including command-derived skills
+        all_skills = self.get_all_skills()
+
         # Merge skills (with optional limit check)
-        merged_context = merge_skills(agent_context, self.skills, max_skills=max_skills)
+        merged_context = merge_skills(agent_context, all_skills, max_skills=max_skills)
 
         # Merge MCP config
         merged_mcp = merge_mcp_configs(mcp_config, self.mcp_config)
