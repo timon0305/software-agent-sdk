@@ -270,8 +270,6 @@ class OpenAISubscriptionAuth:
             code = params.get("code")
             if not code:
                 error_msg = "Missing authorization code"
-                if not callback_future.done():
-                    callback_future.set_exception(RuntimeError(error_msg))
                 return web.Response(
                     text=_HTML_ERROR.replace("{error}", error_msg),
                     content_type="text/html",
