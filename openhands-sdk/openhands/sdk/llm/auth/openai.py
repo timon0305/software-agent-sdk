@@ -263,7 +263,7 @@ class OpenAISubscriptionAuth:
                 if not callback_future.done():
                     callback_future.set_exception(RuntimeError(error_msg))
                 return web.Response(
-                    text=_HTML_ERROR.format(error=error_msg),
+                    text=_HTML_ERROR.replace("{error}", error_msg),
                     content_type="text/html",
                 )
 
@@ -273,7 +273,7 @@ class OpenAISubscriptionAuth:
                 if not callback_future.done():
                     callback_future.set_exception(RuntimeError(error_msg))
                 return web.Response(
-                    text=_HTML_ERROR.format(error=error_msg),
+                    text=_HTML_ERROR.replace("{error}", error_msg),
                     content_type="text/html",
                     status=400,
                 )
@@ -283,7 +283,7 @@ class OpenAISubscriptionAuth:
                 if not callback_future.done():
                     callback_future.set_exception(RuntimeError(error_msg))
                 return web.Response(
-                    text=_HTML_ERROR.format(error=error_msg),
+                    text=_HTML_ERROR.replace("{error}", error_msg),
                     content_type="text/html",
                     status=400,
                 )
@@ -299,7 +299,7 @@ class OpenAISubscriptionAuth:
                 if not callback_future.done():
                     callback_future.set_exception(e)
                 return web.Response(
-                    text=_HTML_ERROR.format(error=str(e)),
+                    text=_HTML_ERROR.replace("{error}", str(e)),
                     content_type="text/html",
                     status=500,
                 )
