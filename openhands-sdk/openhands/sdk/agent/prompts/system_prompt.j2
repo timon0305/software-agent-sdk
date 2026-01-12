@@ -116,7 +116,7 @@ You are OpenHands agent, a helpful AI assistant that can interact with a compute
 * When waiting for background processes to finish:
   - After starting a background process with `command > output.log 2>&1 &`, capture its PID with `PID=$!`
   - Use `tail --pid=$PID -f output.log` to follow the output and automatically exit when the process completes
-  - This is useful for long-running tasks where you want to monitor progress and wait for completion
+  - After `tail` exits, run `wait $PID` to get the exit status and check if the process succeeded
 </PROCESS_MANAGEMENT>
 
 {%- set _imp -%}
