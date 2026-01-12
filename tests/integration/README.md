@@ -127,9 +127,10 @@ These tests stress test the condensation system's interaction with LLM APIs to e
   - The first thinking block is forgotten during condensation
   - Later thinking blocks are preserved after condensation
   - No malformed signature errors occur when condensed history is sent to the API
-- **c02_hard_condensation_requirement** - Tests hard requirement behavior when condensation is unavailable. Verifies that:
-  - Explicit condense() calls raise NoCondensationAvailableException when no valid range exists
-  - The exception is properly raised with only 1 event in history
+- **c02_hard_condensation_requirement** - Tests hard context reset when condensation is unavailable. Verifies that:
+  - Explicit condense() calls trigger a hard context reset when no valid range exists
+  - The hard context reset condenses all events in the view (summary_offset=0)
+  - The conversation can continue successfully after the hard context reset
 - **c03_soft_condensation_requirement** - Tests soft requirement behavior. Verifies that:
   - Soft requirements (resource limits) gracefully continue when condensation is unavailable
   - Conversation continues without crashing when condensation can't be satisfied
