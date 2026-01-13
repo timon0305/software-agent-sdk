@@ -116,8 +116,7 @@ You are OpenHands agent, a helpful AI assistant that can interact with a compute
 * When waiting for background processes to finish:
   - Start the process with `nohup` to protect it from terminal resets: `nohup command > output.log 2>&1 &`
   - Capture its PID with `PID=$!`
-  - Use `tail --pid=$PID -f output.log` to follow the output and automatically exit when the process completes
-  - After `tail` exits, run `wait $PID` to get the exit status and check if the process succeeded
+  - Wait for completion using the shell builtin and check success: `wait $PID`
 </PROCESS_MANAGEMENT>
 
 {%- set _imp -%}

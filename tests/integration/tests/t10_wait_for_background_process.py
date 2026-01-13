@@ -18,11 +18,9 @@ from tests.integration.utils.llm_judge import judge_agent_behavior
 
 
 INSTRUCTION = (
-    "Run the script 'long_task.sh' in the background using 'nohup'. Redirect output "
-    "to 'output.log'. Capture the PID using '$!' and then wait for it to finish using "
-    "the shell 'wait' builtin. After it finishes, tell me the final result from the "
-    "output file and whether the script succeeded or failed based on the exit code "
-    "from 'wait'."
+    "Run the script 'long_task.sh' in the background and wait for it to finish. "
+    "Redirect output to 'output.log'. After it finishes, tell me the final result "
+    "from the output file and whether the script succeeded or failed."
 )
 
 # A script that takes a few seconds to complete and writes output

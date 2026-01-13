@@ -11,6 +11,7 @@ def test_system_prompt_includes_wait_for_background_process_guidance() -> None:
     message = agent.system_message
 
     # Verify the guidance about waiting for background processes is included
-    assert "tail --pid=$PID -f output.log" in message
+    assert "nohup command > output.log 2>&1 &" in message
     assert "Capture its PID with `PID=$!`" in message
+    assert "wait $PID" in message
     assert "When waiting for background processes to finish" in message
