@@ -170,7 +170,7 @@ class RollingCondenser(PipelinableCondenserBase, ABC):
                         )
                         if hard_reset_condensation is not None:
                             return hard_reset_condensation
-                        
+
                     # And if something goes wrong with the hard reset make sure we keep
                     # both errors in the stack
                     except Exception as hard_reset_exception:
