@@ -42,6 +42,16 @@ additional context if needed (e.g., to see the full file content or related code
 
 Analyze the changes and identify specific issues that need attention.
 
+## Additional Review Requirements
+
+- **Search official documentation** for any referenced flags, config keys, endpoints, or behavior to confirm the change is valid and supported.
+- If the PR introduces or changes **access to external APIs** (e.g., GitHub/GitLab/Bitbucket/Datadog/Slack/etc.), verify:
+  - authentication method and required scopes/permissions are correct
+  - endpoint/method/headers are correct
+  - pagination, rate limits, retries/timeouts, and error handling are appropriate
+  - any required configuration is properly documented (env vars, tokens, permissions), ideally with links to official docs
+  - secrets/PII are handled safely (no token leakage in logs, etc.)
+
 ## CRITICAL: Post ONE Single Review with All Comments
 
 After completing your analysis, you MUST post your review as a **single API call** that
