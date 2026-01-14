@@ -311,7 +311,7 @@ class View(BaseModel):
     @staticmethod
     def _filter_unmatched_tool_calls(
         view_events: Sequence[LLMConvertibleEvent],
-        all_events: Sequence[Event],  # noqa: ARG004
+        all_events: Sequence[Event],
     ) -> list[LLMConvertibleEvent]:
         """Filter out unmatched tool call events.
 
@@ -332,7 +332,7 @@ class View(BaseModel):
         observation_tool_call_ids = View._get_observation_tool_call_ids(view_events)
 
         # Build batch info for batch atomicity enforcement
-        action_batch = ActionBatch.from_events(view_events)
+        action_batch = ActionBatch.from_events(all_events)
 
         # First pass: filter out events that don't match based on tool call pairing
         kept_events = [
@@ -346,7 +346,7 @@ class View(BaseModel):
         # Second pass: enforce batch atomicity for ActionEvents
         # If any ActionEvent in a batch is removed, all ActionEvents in that
         # batch should also be removed
-        kept_events = View._enforce_batch_atomicity(kept_events, view_events)
+        kept_events = View._enforce_batch_atomicity(kept_events, all_events)
 
         # Third pass: also remove ObservationEvents whose ActionEvents were removed
         # due to batch atomicity
