@@ -13,6 +13,48 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
     page's content in markdown.
     """
 
+    # Scripts to inject into every new document (before page scripts run)
+    _inject_scripts: list[str] = []
+    # Script identifiers returned by CDP (for cleanup if needed)
+    _injected_script_ids: list[str] = []
+
+    def set_inject_scripts(self, scripts: list[str]) -> None:
+        """Set scripts to be injected into every new document.
+
+        Args:
+            scripts: List of JavaScript code strings to inject.
+                     Each script will be evaluated before page scripts run.
+        """
+        self._inject_scripts = scripts
+
+    async def _inject_scripts_to_session(self) -> None:
+        """Inject configured scripts into the browser session using CDP.
+
+        Uses Page.addScriptToEvaluateOnNewDocument to inject scripts that
+        will run on every new document before the page's scripts execute.
+        """
+        if not self.browser_session or not self._inject_scripts:
+            return
+
+        try:
+            cdp_session = await self.browser_session.get_or_create_cdp_session()
+
+            for script in self._inject_scripts:
+                result = await cdp_session.cdp_client.send.Page.addScriptToEvaluateOnNewDocument(
+                    params={"source": script, "runImmediately": True},
+                    session_id=cdp_session.session_id,
+                )
+                script_id = result.get("identifier")
+                if script_id:
+                    self._injected_script_ids.append(script_id)
+                    logger.debug(f"Injected script with identifier: {script_id}")
+
+            logger.info(
+                f"Injected {len(self._inject_scripts)} script(s) into browser session"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to inject scripts: {e}")
+
     async def _get_storage(self) -> str:
         """Get browser storage (cookies, local storage, session storage)."""
         import json

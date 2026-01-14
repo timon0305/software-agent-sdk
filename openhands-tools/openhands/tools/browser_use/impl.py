@@ -154,6 +154,7 @@ class BrowserToolExecutor(ToolExecutor[BrowserAction, BrowserObservation]):
         session_timeout_minutes: int = 30,
         init_timeout_seconds: int = 30,
         full_output_save_dir: str | None = None,
+        inject_scripts: list[str] | None = None,
         **config,
     ):
         """Initialize BrowserToolExecutor with timeout protection.
@@ -164,7 +165,11 @@ class BrowserToolExecutor(ToolExecutor[BrowserAction, BrowserObservation]):
             session_timeout_minutes: Browser session timeout in minutes
             init_timeout_seconds: Timeout for browser initialization in seconds
             full_output_save_dir: Absolute path to directory to save full output
-            logs and files, used when truncation is needed.
+                logs and files, used when truncation is needed.
+            inject_scripts: List of JavaScript code strings to inject into every
+                new document. Scripts are injected via CDP's
+                Page.addScriptToEvaluateOnNewDocument and run before page scripts.
+                Useful for injecting recording tools like rrweb.
             **config: Additional configuration options
         """
 
@@ -177,6 +182,10 @@ class BrowserToolExecutor(ToolExecutor[BrowserAction, BrowserObservation]):
             if os.getenv("OH_ENABLE_VNC", "false").lower() in {"true", "1", "yes"}:
                 headless = False  # Force headless off if VNC is enabled
                 logger.info("VNC is enabled - running browser in non-headless mode")
+
+            # Configure scripts to inject
+            if inject_scripts:
+                self._server.set_inject_scripts(inject_scripts)
 
             self._config = {
                 "headless": headless,
@@ -281,6 +290,8 @@ class BrowserToolExecutor(ToolExecutor[BrowserAction, BrowserObservation]):
         if not self._initialized:
             # Initialize browser session with our config
             await self._server._init_browser_session(**self._config)
+            # Inject any configured scripts after session is ready
+            await self._server._inject_scripts_to_session()
             self._initialized = True
 
     # Navigation & Browser Control Methods
