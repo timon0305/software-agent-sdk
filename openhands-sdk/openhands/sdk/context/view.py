@@ -332,7 +332,7 @@ class View(BaseModel):
         observation_tool_call_ids = View._get_observation_tool_call_ids(view_events)
 
         # Build batch info for batch atomicity enforcement
-        action_batch = ActionBatch.from_events(all_events)
+        batch = ActionBatch.from_events(all_events)
 
         # First pass: filter out events that don't match based on tool call pairing
         kept_events = [
@@ -352,10 +352,11 @@ class View(BaseModel):
         # due to batch atomicity
         # Find which action IDs are now missing after batch atomicity enforcement
         kept_event_ids = {event.id for event in kept_events}
-        tool_call_ids_to_remove: set[ToolCallID] = set()
-        for action_id, tool_call_id in action_batch.action_id_to_tool_call_id.items():
-            if action_id not in kept_event_ids:
-                tool_call_ids_to_remove.add(tool_call_id)
+        tool_call_ids_to_remove: set[ToolCallID] = {
+            tool_call_id
+            for action_id, tool_call_id in batch.action_id_to_tool_call_id.items()
+            if action_id not in kept_event_ids
+        }
 
         # Filter out ObservationEvents whose ActionEvents were removed
         result = [
@@ -434,7 +435,11 @@ class View(BaseModel):
         is summary metadata present, a CondensationSummaryEvent will be inserted at the
         specified offset.
         """
-        output: list[LLMConvertibleEvent] = []
+        output: list[LLMConvertibleEvent] = [
+            event
+            for event in events
+            if event.id not in condensation.forgotten_event_ids
+        ]
 
         # Copy the events into output, skipping forgotten events.
         for event in events:
