@@ -61,10 +61,23 @@ class TestRemoteConversation:
                 return response
             elif method == "POST" and "/events" in url:
                 # POST to events endpoint (send_message)
+                # Return a proper MessageEvent response
                 response = Mock()
                 response.status_code = 200
                 response.raise_for_status.return_value = None
-                response.json.return_value = {}
+                # Extract message content from request payload if available
+                json_payload = kwargs.get("json", {})
+                content = json_payload.get(
+                    "content", [{"type": "text", "text": "test"}]
+                )
+                response.json.return_value = {
+                    "id": str(uuid.uuid4()),
+                    "source": "user",
+                    "llm_message": {
+                        "role": "user",
+                        "content": content,
+                    },
+                }
                 return response
             elif method == "POST" and "/run" in url:
                 # POST to run endpoint
