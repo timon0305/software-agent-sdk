@@ -441,12 +441,6 @@ class View(BaseModel):
             if event.id not in condensation.forgotten_event_ids
         ]
 
-        # Copy the events into output, skipping forgotten events.
-        for event in events:
-            if event.id in condensation.forgotten_event_ids:
-                continue
-            output.append(event)
-
         # Insert the condensation summary event at the specified offset, if present.
         if condensation.summary is not None and condensation.summary_offset is not None:
             logger.debug(f"Inserting summary at offset {condensation.summary_offset}")
