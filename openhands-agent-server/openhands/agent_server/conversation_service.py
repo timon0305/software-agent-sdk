@@ -220,14 +220,10 @@ class ConversationService:
         Raises:
             PluginFetchError: If the plugin cannot be fetched or loaded
         """
-        if not request.plugin_source:
+        if not request.plugin_source or not request.plugin_source.strip():
             return request
 
         try:
-            # Validate plugin_source format
-            if not request.plugin_source.strip():
-                raise PluginFetchError("plugin_source cannot be empty")
-
             # Validate plugin_path for path traversal attacks
             if request.plugin_path:
                 safe_path = Path(request.plugin_path)

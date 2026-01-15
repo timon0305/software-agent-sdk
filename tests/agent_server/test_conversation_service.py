@@ -1619,17 +1619,17 @@ class TestPluginLoading:
         assert result is request
 
     def test_load_and_merge_plugin_whitespace_source(self, conversation_service):
-        """Test that plugin loading fails for whitespace-only source."""
-        from openhands.sdk.plugin import PluginFetchError
-
+        """Test that plugin loading is skipped for whitespace-only source."""
         request = StartConversationRequest(
             agent=Agent(llm=LLM(model="gpt-4", usage_id="test-llm"), tools=[]),
             workspace=LocalWorkspace(working_dir="/tmp/test"),
             plugin_source="   ",  # Whitespace-only
         )
 
-        with pytest.raises(PluginFetchError, match="plugin_source cannot be empty"):
-            conversation_service._load_and_merge_plugin(request)
+        result = conversation_service._load_and_merge_plugin(request)
+
+        # Request should be unchanged (whitespace-only treated same as empty)
+        assert result is request
 
     def test_load_and_merge_plugin_path_traversal(self, conversation_service):
         """Test that plugin loading fails for path traversal attempts."""
