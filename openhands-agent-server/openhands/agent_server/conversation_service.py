@@ -3,6 +3,7 @@ import importlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 from uuid import UUID, uuid4
 
 import httpx
@@ -50,6 +51,9 @@ class ConversationService:
     Conversation service which stores to a local file store. When the context starts
     all event_services are loaded into memory, and stored when it stops.
     """
+
+    # Resource limits to prevent DoS from malicious plugins
+    MAX_PLUGIN_SKILLS: ClassVar[int] = 100
 
     conversations_dir: Path = field()
     webhook_specs: list[WebhookSpec] = field(default_factory=list)
@@ -232,20 +236,16 @@ class ConversationService:
                         "plugin_path cannot contain parent directory references"
                     )
 
-            # Fetch the plugin (handles caching internally)
-            logger.info(f"Fetching plugin from: {request.plugin_source}")
+            # Fetch and load the plugin
             plugin_path = Plugin.fetch(
                 source=request.plugin_source,
                 ref=request.plugin_ref,
                 subpath=request.plugin_path,
             )
-
-            # Load the plugin
-            logger.info(f"Loading plugin from: {plugin_path}")
             plugin = Plugin.load(plugin_path)
 
             logger.info(
-                f"Loaded plugin '{plugin.name}' with "
+                f"Loaded plugin '{plugin.name}' from {request.plugin_source}: "
                 f"{len(plugin.skills)} skills, "
                 f"hooks={'yes' if plugin.hooks else 'no'}, "
                 f"mcp_config={'yes' if plugin.mcp_config else 'no'}"
@@ -264,8 +264,36 @@ class ConversationService:
                 f"{type(e).__name__}: {e}"
             ) from e
 
-    # Resource limits to prevent DoS from malicious plugins
-    MAX_PLUGIN_SKILLS = 100
+    def _merge_skills(
+        self, existing_context: AgentContext | None, plugin_skills: list
+    ) -> AgentContext:
+        """Merge plugin skills into existing agent context.
+
+        Plugin skills override existing skills with the same name.
+        New plugin skills are appended (dict maintains insertion order).
+
+        Args:
+            existing_context: The agent's current context (may be None)
+            plugin_skills: Skills from the plugin to merge
+
+        Returns:
+            New AgentContext with merged skills
+        """
+        existing_skills = existing_context.skills if existing_context else []
+
+        skills_by_name = {s.name: s for s in existing_skills}
+        for plugin_skill in plugin_skills:
+            if plugin_skill.name in skills_by_name:
+                logger.debug(
+                    f"Plugin skill '{plugin_skill.name}' overrides existing skill"
+                )
+            skills_by_name[plugin_skill.name] = plugin_skill
+
+        merged_skills = list(skills_by_name.values())
+
+        if existing_context:
+            return existing_context.model_copy(update={"skills": merged_skills})
+        return AgentContext(skills=merged_skills)
 
     def _merge_plugin_into_request(
         self, request: StartConversationRequest, plugin: Plugin
@@ -285,50 +313,19 @@ class ConversationService:
         agent = request.agent
         updates: dict = {}
 
-        # Merge skills into agent context
         if plugin.skills:
-            # Validate resource limits to prevent DoS
             if len(plugin.skills) > self.MAX_PLUGIN_SKILLS:
                 raise PluginFetchError(
                     f"Plugin has too many skills "
                     f"({len(plugin.skills)} > {self.MAX_PLUGIN_SKILLS})"
                 )
-
-            existing_context = agent.agent_context
-            existing_skills = existing_context.skills if existing_context else []
-
-            # Merge skills: plugin skills override existing skills with the same name.
-            # New plugin skills are appended (dict maintains insertion order).
-            skills_by_name = {s.name: s for s in existing_skills}
-            for plugin_skill in plugin.skills:
-                if plugin_skill.name in skills_by_name:
-                    logger.debug(
-                        f"Plugin skill '{plugin_skill.name}' overrides existing skill"
-                    )
-                skills_by_name[plugin_skill.name] = plugin_skill
-
-            merged_skills = list(skills_by_name.values())
-
-            if existing_context:
-                new_context = existing_context.model_copy(
-                    update={"skills": merged_skills}
-                )
-            else:
-                new_context = AgentContext(skills=merged_skills)
-
-            updates["agent_context"] = new_context
-            logger.info(
-                f"Merged {len(plugin.skills)} plugin skills into agent context "
-                f"(total: {len(merged_skills)})"
+            updates["agent_context"] = self._merge_skills(
+                agent.agent_context, plugin.skills
             )
 
-        # Merge MCP config
         if plugin.mcp_config:
             existing_mcp = agent.mcp_config or {}
-            # Plugin MCP config is merged, with plugin values taking precedence
-            merged_mcp = {**existing_mcp, **plugin.mcp_config}
-            updates["mcp_config"] = merged_mcp
-            logger.info(f"Merged plugin MCP config ({len(plugin.mcp_config)} entries)")
+            updates["mcp_config"] = {**existing_mcp, **plugin.mcp_config}
 
         # TODO: Handle plugin.hooks registration
         # Hooks require integration with the event service, which is more complex.
