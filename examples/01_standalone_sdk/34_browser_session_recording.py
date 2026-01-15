@@ -16,11 +16,13 @@ Usage:
     # Run the example
     python 34_browser_session_recording.py
 
-The recording will be saved to ./browser_recording.json and can be replayed with:
+The recording will be automatically saved to the persistence directory when
+browser_stop_recording is called. You can replay it with:
     - rrweb-player: https://github.com/rrweb-io/rrweb/tree/master/packages/rrweb-player
     - Online viewer: https://www.rrweb.io/demo/
 """
 
+import glob
 import json
 import os
 
@@ -71,6 +73,7 @@ def conversation_callback(event: Event):
         llm_messages.append(event.to_llm_message())
 
 
+# Create conversation with persistence_dir set to save browser recordings
 conversation = Conversation(
     agent=agent, 
     callbacks=[conversation_callback], 
@@ -81,7 +84,7 @@ conversation = Conversation(
 # The prompt instructs the agent to:
 # 1. Start recording the browser session
 # 2. Browse to a website and perform some actions
-# 3. Stop recording and save the recording
+# 3. Stop recording (auto-saves to file)
 PROMPT = """
 Please complete the following task to demonstrate browser session recording:
 
