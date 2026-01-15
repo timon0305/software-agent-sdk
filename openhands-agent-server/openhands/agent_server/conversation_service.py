@@ -237,15 +237,17 @@ class ConversationService:
                     )
 
             # Fetch and load the plugin
+            logger.debug(f"Fetching plugin from: {request.plugin_source}")
             plugin_path = Plugin.fetch(
                 source=request.plugin_source,
                 ref=request.plugin_ref,
                 subpath=request.plugin_path,
             )
+            logger.debug(f"Loading plugin from: {plugin_path}")
             plugin = Plugin.load(plugin_path)
 
             logger.info(
-                f"Loaded plugin '{plugin.name}' from {request.plugin_source}: "
+                f"Loaded plugin '{plugin.name}': "
                 f"{len(plugin.skills)} skills, "
                 f"hooks={'yes' if plugin.hooks else 'no'}, "
                 f"mcp_config={'yes' if plugin.mcp_config else 'no'}"
