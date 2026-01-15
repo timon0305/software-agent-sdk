@@ -36,7 +36,12 @@ def sample_conversation_id():
 def mock_event_service():
     """Create a mock EventService for testing."""
     service = AsyncMock(spec=EventService)
-    service.send_message = AsyncMock()
+    # Create a mock MessageEvent that send_message will return
+    mock_message_event = MessageEvent(
+        source="user",
+        llm_message=Message(role="user", content=[TextContent(text="mock")]),
+    )
+    service.send_message = AsyncMock(return_value=mock_message_event)
     return service
 
 
@@ -63,12 +68,15 @@ class TestSendMessageEndpoint:
             )
 
             assert response.status_code == 200
-            assert response.json() == {"success": True}
+            # Now returns MessageEvent instead of Success
+            response_data = response.json()
+            assert response_data["kind"] == "MessageEvent"
+            assert response_data["source"] == "user"
 
             # Verify send_message was called with correct parameters
             mock_event_service.send_message.assert_called_once()
             call_args = mock_event_service.send_message.call_args
-            message, run_flag = call_args[0]
+            message, run_flag, sender = call_args[0]
 
             assert isinstance(message, Message)
             assert message.role == "user"
@@ -76,6 +84,7 @@ class TestSendMessageEndpoint:
             assert isinstance(message.content[0], TextContent)
             assert message.content[0].text == "Hello, world!"
             assert run_flag is True
+            assert sender is None
         finally:
             # Clean up the dependency override
             client.app.dependency_overrides.clear()
@@ -100,16 +109,19 @@ class TestSendMessageEndpoint:
             )
 
             assert response.status_code == 200
-            assert response.json() == {"success": True}
+            # Now returns MessageEvent instead of Success
+            response_data = response.json()
+            assert response_data["kind"] == "MessageEvent"
 
             # Verify send_message was called with run=False
             mock_event_service.send_message.assert_called_once()
             call_args = mock_event_service.send_message.call_args
-            message, run_flag = call_args[0]
+            message, run_flag, sender = call_args[0]
 
             assert isinstance(message, Message)
             assert message.role == "assistant"
             assert run_flag is False
+            assert sender is None
         finally:
             # Clean up the dependency override
             client.app.dependency_overrides.clear()
@@ -134,16 +146,19 @@ class TestSendMessageEndpoint:
             )
 
             assert response.status_code == 200
-            assert response.json() == {"success": True}
+            # Now returns MessageEvent instead of Success
+            response_data = response.json()
+            assert response_data["kind"] == "MessageEvent"
 
             # Verify send_message was called with default run value (False)
             mock_event_service.send_message.assert_called_once()
             call_args = mock_event_service.send_message.call_args
-            message, run_flag = call_args[0]
+            message, run_flag, sender = call_args[0]
 
             assert isinstance(message, Message)
             assert message.role == "user"
             assert run_flag is False  # Default value from SendMessageRequest
+            assert sender is None
         finally:
             # Clean up the dependency override
             client.app.dependency_overrides.clear()
@@ -204,12 +219,14 @@ class TestSendMessageEndpoint:
             )
 
             assert response.status_code == 200
-            assert response.json() == {"success": True}
+            # Now returns MessageEvent instead of Success
+            response_data = response.json()
+            assert response_data["kind"] == "MessageEvent"
 
             # Verify message content was parsed correctly
             mock_event_service.send_message.assert_called_once()
             call_args = mock_event_service.send_message.call_args
-            message, run_flag = call_args[0]
+            message, run_flag, sender = call_args[0]
 
             assert isinstance(message, Message)
             assert message.role == "user"
@@ -219,6 +236,7 @@ class TestSendMessageEndpoint:
             assert text_content[0].text == "First part"
             assert text_content[1].text == "Second part"
             assert run_flag is False
+            assert sender is None
         finally:
             # Clean up the dependency override
             client.app.dependency_overrides.clear()
@@ -243,16 +261,19 @@ class TestSendMessageEndpoint:
             )
 
             assert response.status_code == 200
-            assert response.json() == {"success": True}
+            # Now returns MessageEvent instead of Success
+            response_data = response.json()
+            assert response_data["kind"] == "MessageEvent"
 
             # Verify system message was processed correctly
             mock_event_service.send_message.assert_called_once()
             call_args = mock_event_service.send_message.call_args
-            message, run_flag = call_args[0]
+            message, run_flag, sender = call_args[0]
 
             assert isinstance(message, Message)
             assert message.role == "system"
             assert run_flag is True
+            assert sender is None
         finally:
             # Clean up the dependency override
             client.app.dependency_overrides.clear()

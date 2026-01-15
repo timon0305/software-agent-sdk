@@ -608,9 +608,9 @@ class TestEventServiceSendMessage:
             # Call send_message with default run=True
             await event_service.send_message(message)
 
-            # Verify send_message was called via executor
+            # Verify send_message was called via executor (with sender=None)
             mock_loop.run_in_executor.assert_any_call(
-                None, conversation.send_message, message
+                None, conversation.send_message, message, None
             )
             # Verify run was called via executor since run=True and agent is not running
             assert (
@@ -638,9 +638,9 @@ class TestEventServiceSendMessage:
             # Call send_message with run=False
             await event_service.send_message(message, run=False)
 
-            # Verify send_message was called via executor
+            # Verify send_message was called via executor (with sender=None)
             mock_loop.run_in_executor.assert_called_once_with(
-                None, conversation.send_message, message
+                None, conversation.send_message, message, None
             )
             # Verify run was NOT called since run=False
             assert mock_loop.run_in_executor.call_count == 1  # Only send_message call
@@ -672,9 +672,9 @@ class TestEventServiceSendMessage:
             # Call send_message with run=True
             await event_service.send_message(message, run=True)
 
-            # Verify send_message was called via executor
+            # Verify send_message was called via executor (with sender=None)
             mock_loop.run_in_executor.assert_called_once_with(
-                None, conversation.send_message, message
+                None, conversation.send_message, message, None
             )
             # Verify run was NOT called since agent is already running
             assert mock_loop.run_in_executor.call_count == 1  # Only send_message call
@@ -704,9 +704,9 @@ class TestEventServiceSendMessage:
             # Call send_message with run=True
             await event_service.send_message(message, run=True)
 
-            # Verify send_message was called via executor
+            # Verify send_message was called via executor (with sender=None)
             mock_loop.run_in_executor.assert_any_call(
-                None, conversation.send_message, message
+                None, conversation.send_message, message, None
             )
             # Verify run was called via executor since agent is idle
             mock_loop.run_in_executor.assert_any_call(None, conversation.run)
@@ -732,21 +732,21 @@ class TestEventServiceSendMessage:
             user_message = Message(role="user", content=[])
             await event_service.send_message(user_message, run=False)
             mock_loop.run_in_executor.assert_any_call(
-                None, conversation.send_message, user_message
+                None, conversation.send_message, user_message, None
             )
 
             # Test with assistant message
             assistant_message = Message(role="assistant", content=[])
             await event_service.send_message(assistant_message, run=False)
             mock_loop.run_in_executor.assert_any_call(
-                None, conversation.send_message, assistant_message
+                None, conversation.send_message, assistant_message, None
             )
 
             # Test with system message
             system_message = Message(role="system", content=[])
             await event_service.send_message(system_message, run=False)
             mock_loop.run_in_executor.assert_any_call(
-                None, conversation.send_message, system_message
+                None, conversation.send_message, system_message, None
             )
 
 
