@@ -1755,4 +1755,7 @@ class TestPluginLoading:
 
         # Should not raise
         result = conversation_service._merge_plugin_into_request(request, plugin)
-        assert len(result.agent.agent_context.skills) == conversation_service.MAX_PLUGIN_SKILLS
+        assert (
+            len(result.agent.agent_context.skills)
+            == conversation_service.MAX_PLUGIN_SKILLS
+        )

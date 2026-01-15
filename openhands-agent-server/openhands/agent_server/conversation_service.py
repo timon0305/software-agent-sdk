@@ -298,7 +298,7 @@ class ConversationService:
             existing_skills = existing_context.skills if existing_context else []
 
             # Merge skills: plugin skills override existing skills with the same name.
-            # New plugin skills are appended at the end (dict maintains insertion order).
+            # New plugin skills are appended (dict maintains insertion order).
             skills_by_name = {s.name: s for s in existing_skills}
             for plugin_skill in plugin.skills:
                 if plugin_skill.name in skills_by_name:
