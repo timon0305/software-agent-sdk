@@ -11,7 +11,6 @@ from pydantic import BaseModel, computed_field
 from openhands.sdk.event import (
     Condensation,
     CondensationRequest,
-    CondensationSummaryEvent,
     LLMConvertibleEvent,
 )
 from openhands.sdk.event.base import Event, EventID
@@ -322,8 +321,7 @@ class View(BaseModel):
 
         Args:
             view_events: The list of events to filter
-            all_events: The complete original list of all events (unused for now,
-                        but included to match signature pattern)
+            all_events: The complete original list of all events
 
         Returns:
             Filtered list of events with unmatched tool calls removed
@@ -426,31 +424,6 @@ class View(BaseModel):
         return threshold
 
     @staticmethod
-    def apply_condensation(
-        events: Sequence[LLMConvertibleEvent], condensation: Condensation
-    ) -> list[LLMConvertibleEvent]:
-        """Apply a single condensation to a list of events.
-
-        Events marked to be forgotten in the condensation will be removed, and if there
-        is summary metadata present, a CondensationSummaryEvent will be inserted at the
-        specified offset.
-        """
-        output: list[LLMConvertibleEvent] = [
-            event
-            for event in events
-            if event.id not in condensation.forgotten_event_ids
-        ]
-
-        # Insert the condensation summary event at the specified offset, if present.
-        if (
-            summary_event := condensation.summary_event
-        ) is not None and condensation.summary_offset is not None:
-            logger.debug(f"Inserting summary at offset {condensation.summary_offset}")
-            output.insert(condensation.summary_offset, summary_event)
-
-        return output
-
-    @staticmethod
     def unhandled_condensation_request_exists(
         events: Sequence[Event],
     ) -> bool:
@@ -474,17 +447,24 @@ class View(BaseModel):
         output: list[LLMConvertibleEvent] = []
         condensations: list[Condensation] = []
 
+        # Generate the LLMConvertibleEvent objects the agent can send to the LLM by
+        # removing un-sendable events and applying condensations in order.
         for event in events:
-            if isinstance(event, CondensationRequest):
-                continue
-
-            elif isinstance(event, Condensation):
+            # By the time we come across a Condensation event, the output list should
+            # already reflect the events seen by the agent up to that point. We can
+            # therefore apply the condensation semantics directly to the output list.
+            if isinstance(event, Condensation):
                 condensations.append(event)
-                output = View.apply_condensation(output, event)
+                output = event.apply(output)
 
             elif isinstance(event, LLMConvertibleEvent):
                 output.append(event)
 
+            # If the event isn't related to condensation and isn't LLMConvertible, it
+            # should not be in the resulting view. Examples include certain internal
+            # events used for state tracking that the LLM does not need to see -- see,
+            # for example, ConversationStateUpdateEvent, PauseEvent, and (relevant here)
+            # CondensationRequest.
             else:
                 logger.debug(
                     f"Skipping non-LLMConvertibleEvent of type {type(event)} "
