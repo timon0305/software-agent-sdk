@@ -26,6 +26,8 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
+from openhands.sdk.hooks import HookConfig
+from openhands.sdk.hooks.config import HookMatcher
 from openhands.sdk.plugin import Plugin, PluginFetchError
 from openhands.sdk.utils.cipher import Cipher
 
@@ -293,6 +295,84 @@ class ConversationService:
             return existing_context.model_copy(update={"skills": merged_skills})
         return AgentContext(skills=merged_skills)
 
+    def _merge_hook_configs(
+        self,
+        base_config: HookConfig | None,
+        plugin_config: HookConfig | None,
+    ) -> HookConfig | None:
+        """Merge plugin hooks into base hook configuration.
+
+        Design Decisions:
+        -----------------
+        This method implements ADDITIVE (concatenation) semantics for hooks,
+        following Claude Code's documented behavior where "plugin hooks run
+        alongside your custom hooks" and "multiple hooks from different sources
+        can respond to the same event."
+
+        This differs from skill merging (which uses replacement semantics)
+        because:
+        - Skills provide LLM context/instructions - duplicates would be confusing
+        - Hooks are event handlers - multiple handlers is a standard pattern
+          (e.g., one hook for logging, another for validation)
+
+        Merge Behavior:
+        ---------------
+        For each event type (PreToolUse, PostToolUse, etc.), the matcher lists
+        are concatenated: base matchers first, then plugin matchers appended.
+
+        Example:
+            base_config has PreToolUse: [matcher_A, matcher_B]
+            plugin_config has PreToolUse: [matcher_C]
+            result has PreToolUse: [matcher_A, matcher_B, matcher_C]
+
+        Execution Order Note (OpenHands vs Claude Code):
+        ------------------------------------------------
+        **IMPORTANT**: OpenHands SDK executes hooks SEQUENTIALLY with early-exit
+        semantics, while Claude Code executes hooks IN PARALLEL.
+
+        In OpenHands:
+        - Hooks execute in order (base hooks first, then plugin hooks)
+        - For PreToolUse: if a base hook blocks (exit code 2), plugin hooks
+          do NOT run (stop_on_block=True behavior)
+        - For PostToolUse: all hooks run regardless of individual results
+
+        In Claude Code:
+        - All matching hooks execute simultaneously in parallel
+        - No execution order guarantees
+        - Blocking decisions are aggregated after all hooks complete
+
+        This means append order matters more in OpenHands - base hooks get
+        "first say" on blocking decisions for PreToolUse events.
+
+        Args:
+            base_config: Existing hook configuration from the request (may be None)
+            plugin_config: Hook configuration from the loaded plugin (may be None)
+
+        Returns:
+            Merged HookConfig, or None if both inputs are None
+        """
+        if base_config is None and plugin_config is None:
+            return None
+        if base_config is None:
+            return plugin_config
+        if plugin_config is None:
+            return base_config
+
+        # Merge hooks by event type, concatenating matcher lists
+        # Base matchers come first, plugin matchers are appended
+        merged_hooks: dict[str, list[HookMatcher]] = {}
+
+        all_event_types = set(base_config.hooks.keys()) | set(
+            plugin_config.hooks.keys()
+        )
+
+        for event_type in all_event_types:
+            base_matchers = base_config.hooks.get(event_type, [])
+            plugin_matchers = plugin_config.hooks.get(event_type, [])
+            merged_hooks[event_type] = base_matchers + plugin_matchers
+
+        return HookConfig(hooks=merged_hooks)
+
     def _merge_plugin_into_request(
         self, request: StartConversationRequest, plugin: Plugin
     ) -> StartConversationRequest:
@@ -309,35 +389,43 @@ class ConversationService:
             PluginFetchError: If the plugin exceeds resource limits
         """
         agent = request.agent
-        updates: dict = {}
+        agent_updates: dict = {}
+        request_updates: dict = {}
 
+        # Merge skills into agent context
         if plugin.skills:
             if len(plugin.skills) > self.MAX_PLUGIN_SKILLS:
                 raise PluginFetchError(
                     f"Plugin has too many skills "
                     f"({len(plugin.skills)} > {self.MAX_PLUGIN_SKILLS})"
                 )
-            updates["agent_context"] = self._merge_skills(
+            agent_updates["agent_context"] = self._merge_skills(
                 agent.agent_context, plugin.skills
             )
 
+        # Merge MCP config into agent
         if plugin.mcp_config:
             existing_mcp = agent.mcp_config or {}
-            updates["mcp_config"] = {**existing_mcp, **plugin.mcp_config}
+            agent_updates["mcp_config"] = {**existing_mcp, **plugin.mcp_config}
 
-        # TODO: Handle plugin.hooks registration
-        # Hooks require integration with the event service, which is more complex.
-        # For now, we log a warning if hooks are present but not applied.
+        # Merge hooks into request's hook_config
+        # See _merge_hook_configs docstring for detailed design rationale
         if plugin.hooks:
-            logger.warning(
-                f"Plugin '{plugin.name}' has hooks configured, but hook "
-                "registration is not yet implemented. Hooks will be ignored."
-            )
+            merged_hooks = self._merge_hook_configs(request.hook_config, plugin.hooks)
+            if merged_hooks:
+                request_updates["hook_config"] = merged_hooks
+                logger.info(
+                    f"Merged hooks from plugin '{plugin.name}': "
+                    f"{list(plugin.hooks.hooks.keys())} event types"
+                )
 
-        # Create updated agent if there are changes
-        if updates:
-            updated_agent = agent.model_copy(update=updates)
-            return request.model_copy(update={"agent": updated_agent})
+        # Build the updated request
+        if agent_updates:
+            updated_agent = agent.model_copy(update=agent_updates)
+            request_updates["agent"] = updated_agent
+
+        if request_updates:
+            return request.model_copy(update=request_updates)
 
         return request
 

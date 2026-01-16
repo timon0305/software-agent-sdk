@@ -413,6 +413,11 @@ class EventService:
             self.stored.agent.model_dump(context={"expose_secrets": True}),
         )
 
+        # Create LocalConversation with hook_config if provided
+        # Hook execution in OpenHands differs from Claude Code:
+        # - OpenHands: Sequential execution with early-exit on block
+        # - Claude Code: Parallel execution of all matching hooks
+        # See ConversationService._merge_hook_configs for detailed documentation
         conversation = LocalConversation(
             agent=agent,
             workspace=workspace,
@@ -426,6 +431,7 @@ class EventService:
             visualizer=None,
             secrets=self.stored.secrets,
             cipher=self.cipher,
+            hook_config=self.stored.hook_config,
         )
 
         # Set confirmation mode if enabled

@@ -12,6 +12,7 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
+from openhands.sdk.hooks import HookConfig
 from openhands.sdk.llm.utils.metrics import MetricsSnapshot
 from openhands.sdk.secret import SecretSource
 from openhands.sdk.security.analyzer import SecurityAnalyzerBase
@@ -125,6 +126,15 @@ class StartConversationRequest(BaseModel):
     plugin_path: str | None = Field(
         default=None,
         description="Optional subdirectory path within the plugin repository.",
+    )
+    hook_config: HookConfig | None = Field(
+        default=None,
+        description=(
+            "Hook configuration for this conversation. Hooks are shell scripts that "
+            "run at key lifecycle events (PreToolUse, PostToolUse, UserPromptSubmit, "
+            "Stop, etc.). When a plugin is loaded, its hooks are merged with this "
+            "configuration using additive semantics (both run)."
+        ),
     )
 
 
