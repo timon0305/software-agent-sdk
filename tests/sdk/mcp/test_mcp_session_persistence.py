@@ -14,13 +14,13 @@ import socket
 import threading
 import time
 from collections.abc import Generator
-from typing import Any
+from typing import Literal
 
 import httpx
 import pytest
 from fastmcp import FastMCP
-from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 from openhands.sdk.mcp import create_mcp_tools
 from openhands.sdk.mcp.client import MCPClient
@@ -58,12 +58,12 @@ def _wait_for_port(port: int, timeout: float = 5.0, interval: float = 0.1) -> No
 
 class LiveMCPTestServer:
     """Live MCP server for testing session persistence.
-    
+
     This server tracks:
     - Authentication state per session
     - Call counts per session
     - All session IDs seen
-    
+
     This allows tests to verify session persistence behavior.
     """
 
@@ -71,18 +71,18 @@ class LiveMCPTestServer:
         self.mcp = FastMCP(name)
         self.port: int | None = None
         self._server_thread: threading.Thread | None = None
-        
+
         # Track state for assertions
         self.authenticated_sessions: set[str] = set()
         self.session_call_counts: dict[str, int] = {}
         self.all_session_ids: list[str] = []
-        
+
         self._register_tools()
 
     def _register_tools(self):
         """Register tools that track session state."""
         server = self
-        
+
         @self.mcp.tool()
         def set_token(token: str) -> str:
             """Authenticate the current session with a token."""
@@ -110,7 +110,9 @@ class LiveMCPTestServer:
             """Add two numbers."""
             return a + b
 
-    def start(self, transport: str = "http") -> int:
+    def start(
+        self, transport: Literal["http", "streamable-http", "sse"] = "http"
+    ) -> int:
         """Start the server and return the port."""
         self.port = _find_free_port()
         path = "/sse" if transport == "sse" else "/mcp"
@@ -175,7 +177,7 @@ class TestMCPSessionPersistence:
         self, live_mcp_server: LiveMCPTestServer
     ):
         """Test that the same session is reused across multiple tool calls.
-        
+
         This is the primary test for the session persistence fix.
         With the fix, all tool calls should use the same connection/session.
         """
@@ -191,31 +193,31 @@ class TestMCPSessionPersistence:
         tools = create_mcp_tools(config, timeout=10.0)
         echo_tool = next(t for t in tools if t.name == "echo")
         add_tool = next(t for t in tools if t.name == "add_numbers")
-        
-        executor = echo_tool.executor
-        assert isinstance(executor, MCPToolExecutor)
-        
-        # Track connection count through the client
-        initial_connection_count = executor.client._connection_count
-        
+
+        echo_executor = echo_tool.executor
+        assert isinstance(echo_executor, MCPToolExecutor)
+
+        add_executor = add_tool.executor
+        assert isinstance(add_executor, MCPToolExecutor)
+
         # Make multiple tool calls
         for i in range(3):
             action = echo_tool.action_from_arguments({"message": f"test_{i}"})
-            result = echo_tool.executor(action)
+            result = echo_executor(action)
             assert f"test_{i}" in result.text
-        
+
         # Use a different tool - should reuse same connection
         action = add_tool.action_from_arguments({"a": 5, "b": 3})
-        result = add_tool.executor(action)
+        result = add_executor(action)
         assert "8" in result.text
-        
+
         # Verify connection was established only once
         # The connection count should be 1 (one active connection)
-        assert executor._connection_established is True
-        
+        assert echo_executor._connection_established is True
+
         # Clean up
-        executor.close()
-        assert executor._connection_established is False
+        echo_executor.close()
+        assert echo_executor._connection_established is False
 
     def test_executor_close_releases_connection(
         self, live_mcp_server: LiveMCPTestServer
@@ -234,16 +236,16 @@ class TestMCPSessionPersistence:
         tool = next(t for t in tools if t.name == "echo")
         executor = tool.executor
         assert isinstance(executor, MCPToolExecutor)
-        
+
         # Make a call to establish connection
         action = tool.action_from_arguments({"message": "test"})
-        tool.executor(action)
-        
+        executor(action)
+
         assert executor._connection_established is True
-        
+
         # Close executor
         executor.close()
-        
+
         assert executor._connection_established is False
 
     def test_multiple_servers_independent_sessions(
@@ -253,7 +255,7 @@ class TestMCPSessionPersistence:
         # Start a second server
         server2 = LiveMCPTestServer("server2")
         server2.start(transport="http")
-        
+
         try:
             config = {
                 "mcpServers": {
@@ -269,57 +271,58 @@ class TestMCPSessionPersistence:
             }
 
             tools = create_mcp_tools(config, timeout=10.0)
-            
+
             # Tools should be prefixed with server name when multiple servers
             server1_echo = next(t for t in tools if t.name == "server1_echo")
             server2_echo = next(t for t in tools if t.name == "server2_echo")
-            
+
+            server1_executor = server1_echo.executor
+            server2_executor = server2_echo.executor
+            assert isinstance(server1_executor, MCPToolExecutor)
+            assert isinstance(server2_executor, MCPToolExecutor)
+
             # Call tools on both servers
             action1 = server1_echo.action_from_arguments({"message": "from_server1"})
-            result1 = server1_echo.executor(action1)
+            result1 = server1_executor(action1)
             assert "from_server1" in result1.text
-            
+
             action2 = server2_echo.action_from_arguments({"message": "from_server2"})
-            result2 = server2_echo.executor(action2)
+            result2 = server2_executor(action2)
             assert "from_server2" in result2.text
-            
+
             # Both executors should have their own connections
-            assert server1_echo.executor._connection_established is True
-            assert server2_echo.executor._connection_established is True
-            
+            assert server1_executor._connection_established is True
+            assert server2_executor._connection_established is True
+
             # Clean up
-            server1_echo.executor.close()
-            server2_echo.executor.close()
-            
+            server1_executor.close()
+            server2_executor.close()
+
         finally:
             server2.stop()
 
-    def test_session_manager_tracks_sessions(
-        self, live_mcp_server: LiveMCPTestServer
-    ):
+    def test_session_manager_tracks_sessions(self, live_mcp_server: LiveMCPTestServer):
         """Test that MCPSessionManager properly tracks session state."""
         session_manager = MCPSessionManager()
         server_url = f"http://127.0.0.1:{live_mcp_server.port}/mcp"
-        
+
         # Initially not connected
         assert not session_manager.is_connected(server_url)
         assert session_manager.get_stored_session_id(server_url) is None
-        
+
         # Mark as connected with session ID
         session_manager.mark_connected(server_url, "test-session-123")
-        
+
         assert session_manager.is_connected(server_url)
-        
+
         # Mark as disconnected
         session_manager.mark_disconnected(server_url)
-        
+
         assert not session_manager.is_connected(server_url)
 
-    def test_connection_reuse_performance(
-        self, live_mcp_server: LiveMCPTestServer
-    ):
+    def test_connection_reuse_performance(self, live_mcp_server: LiveMCPTestServer):
         """Test that connection reuse improves performance.
-        
+
         Multiple calls with connection reuse should be faster than
         multiple calls with reconnection overhead.
         """
@@ -334,67 +337,70 @@ class TestMCPSessionPersistence:
 
         tools = create_mcp_tools(config, timeout=10.0)
         tool = next(t for t in tools if t.name == "echo")
-        
+        executor = tool.executor
+        assert isinstance(executor, MCPToolExecutor)
+
         # Time multiple calls with connection reuse
         start_time = time.time()
         for i in range(5):
             action = tool.action_from_arguments({"message": f"perf_test_{i}"})
-            result = tool.executor(action)
+            result = executor(action)
             assert f"perf_test_{i}" in result.text
         elapsed = time.time() - start_time
-        
+
         # Should complete reasonably fast with connection reuse
         # (exact threshold depends on system, but should be < 5 seconds)
         assert elapsed < 5.0, f"Tool calls took too long: {elapsed}s"
-        
+
         # Clean up
-        tool.executor.close()
+        executor.close()
 
 
 class TestMCPClientConnectionReuse:
     """Tests for MCPClient connection reuse behavior."""
 
-    def test_client_connection_count_tracking(
-        self, live_mcp_server: LiveMCPTestServer
-    ):
+    def test_client_connection_count_tracking(self, live_mcp_server: LiveMCPTestServer):
         """Test that MCPClient properly tracks connection count."""
         from fastmcp.mcp_config import MCPConfig
+
         from openhands.sdk.mcp.utils import log_handler
-        
-        config = MCPConfig.model_validate({
-            "mcpServers": {
-                "test": {
-                    "transport": "http",
-                    "url": f"http://127.0.0.1:{live_mcp_server.port}/mcp",
+
+        config = MCPConfig.model_validate(
+            {
+                "mcpServers": {
+                    "test": {
+                        "transport": "http",
+                        "url": f"http://127.0.0.1:{live_mcp_server.port}/mcp",
+                    }
                 }
             }
-        })
-        
+        )
+
         client = MCPClient(config, log_handler=log_handler)
-        
+
         # Initial state
         assert client._connection_count == 0
-        
+
         # Use async context to test connection counting
         async def test_async():
             # First entry
             await client.__aenter__()
             assert client._connection_count == 1
-            
+
             # Reentrant entry (should reuse connection)
             await client.__aenter__()
             assert client._connection_count == 2
-            
+
             # First exit (should not close)
             await client.__aexit__(None, None, None)
             assert client._connection_count == 1
-            
+
             # Final exit (should close)
             await client.__aexit__(None, None, None)
             assert client._connection_count == 0
-        
+
         client.call_async_from_sync(test_async, timeout=10.0)
-        
+
         # Clean up
         client.sync_close()
 
@@ -402,17 +408,17 @@ class TestMCPClientConnectionReuse:
 @pytest.mark.asyncio
 class TestMCPSessionDirectVerification:
     """Direct async tests to verify MCP session behavior with live servers."""
-    
+
     async def test_streamable_http_creates_unique_sessions_per_context(
         self, live_mcp_server: LiveMCPTestServer
     ):
         """Verify that each streamable_http_client context creates a new session.
-        
+
         This documents the underlying MCP behavior that our SDK must handle.
         """
         url = f"http://127.0.0.1:{live_mcp_server.port}/mcp"
         session_ids = []
-        
+
         # Each context manager entry creates a NEW session
         for i in range(3):
             async with streamablehttp_client(url) as (read, write, get_session_id):
@@ -420,37 +426,37 @@ class TestMCPSessionDirectVerification:
                     await session.initialize()
                     session_id = get_session_id()
                     session_ids.append(session_id)
-                    logger.info(f"Connection {i+1}: Session ID = {session_id}")
-        
+                    logger.info(f"Connection {i + 1}: Session ID = {session_id}")
+
         # Filter out None values
         valid_session_ids = [s for s in session_ids if s is not None]
-        
+
         if valid_session_ids:
             unique_sessions = set(valid_session_ids)
             # Each context creates a unique session - expected behavior
             assert len(unique_sessions) == len(valid_session_ids), (
                 "Raw MCP client creates unique session per connection"
             )
-    
+
     async def test_session_stable_within_context(
         self, live_mcp_server: LiveMCPTestServer
     ):
         """Verify session ID remains stable within a single context."""
         url = f"http://127.0.0.1:{live_mcp_server.port}/mcp"
-        
+
         async with streamablehttp_client(url) as (read, write, get_session_id):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                
+
                 session_id_1 = get_session_id()
-                
+
                 # Multiple calls within same session
                 await session.list_tools()
                 session_id_2 = get_session_id()
-                
+
                 await session.list_tools()
                 session_id_3 = get_session_id()
-                
+
                 # Session ID should be stable within context
                 assert session_id_1 == session_id_2 == session_id_3, (
                     "Session ID changed within the same connection context!"
@@ -460,9 +466,7 @@ class TestMCPSessionDirectVerification:
 class TestMCPToolExecutorLifecycle:
     """Tests for MCPToolExecutor lifecycle management."""
 
-    def test_lazy_connection_establishment(
-        self, live_mcp_server: LiveMCPTestServer
-    ):
+    def test_lazy_connection_establishment(self, live_mcp_server: LiveMCPTestServer):
         """Test that connection is not established until first tool call."""
         config = {
             "mcpServers": {
@@ -477,24 +481,22 @@ class TestMCPToolExecutorLifecycle:
         tool = next(t for t in tools if t.name == "echo")
         executor = tool.executor
         assert isinstance(executor, MCPToolExecutor)
-        
+
         # Connection should NOT be established yet (lazy)
         # Note: create_mcp_tools establishes a connection to list tools,
         # but the executor's connection for tool calls is separate
-        
+
         # Make a call - this should establish the executor's connection
         action = tool.action_from_arguments({"message": "test"})
-        tool.executor(action)
-        
+        executor(action)
+
         # Now connection should be established
         assert executor._connection_established is True
-        
+
         # Clean up
         executor.close()
 
-    def test_graceful_cleanup_on_error(
-        self, live_mcp_server: LiveMCPTestServer
-    ):
+    def test_graceful_cleanup_on_error(self, live_mcp_server: LiveMCPTestServer):
         """Test that cleanup happens gracefully even after errors."""
         config = {
             "mcpServers": {
@@ -508,12 +510,13 @@ class TestMCPToolExecutorLifecycle:
         tools = create_mcp_tools(config, timeout=10.0)
         tool = next(t for t in tools if t.name == "add_numbers")
         executor = tool.executor
-        
+        assert isinstance(executor, MCPToolExecutor)
+
         # Make a successful call first
         action = tool.action_from_arguments({"a": 1, "b": 2})
-        result = tool.executor(action)
+        result = executor(action)
         assert "3" in result.text
-        
+
         # Close should work even if there were previous errors
         executor.close()
         assert executor._connection_established is False

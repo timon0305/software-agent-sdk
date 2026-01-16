@@ -20,7 +20,7 @@ class MCPClient(AsyncMCPClient):
     but owns a background event loop and offers:
       - call_async_from_sync(awaitable_or_fn, *args, timeout=None, **kwargs)
       - call_sync_from_async(fn, *args, **kwargs)  # await this from async code
-      
+
     Additionally tracks session state for persistence:
       - _session_id: The current MCP session ID (set after connection)
       - _server_url: The server URL for session tracking
@@ -71,12 +71,12 @@ class MCPClient(AsyncMCPClient):
     def session_id(self) -> str | None:
         """Get the current session ID."""
         return self._session_id
-    
+
     @property
     def server_url(self) -> str | None:
         """Get the server URL for this client."""
         return self._server_url
-    
+
     def set_session_id(self, session_id: str | None) -> None:
         """Set the session ID (called after connection established)."""
         self._session_id = session_id
@@ -85,7 +85,7 @@ class MCPClient(AsyncMCPClient):
 
     async def __aenter__(self):
         """Enter the async context manager with connection reuse support.
-        
+
         Uses reference counting to support reentrant context managers.
         Only establishes a new connection on the first entry.
         """
@@ -99,10 +99,10 @@ class MCPClient(AsyncMCPClient):
         else:
             # Reentrant entry - connection already established
             return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the async context manager with connection reuse support.
-        
+
         Only closes the connection when the last context exits.
         """
         self._connection_count -= 1
@@ -111,14 +111,16 @@ class MCPClient(AsyncMCPClient):
             return await super().__aexit__(exc_type, exc_val, exc_tb)
         # Not the last exit - keep connection open
         return None
-    
+
     def _capture_session_id(self) -> None:
         """Try to capture session ID from the underlying transport."""
         try:
             # The fastmcp Client may have a transport with session ID
-            if hasattr(self, '_transport') and self._transport:
-                if hasattr(self._transport, 'get_session_id'):
-                    session_id = self._transport.get_session_id()
+            transport = getattr(self, "_transport", None)
+            if transport is not None:
+                get_session_id_fn = getattr(transport, "get_session_id", None)
+                if get_session_id_fn is not None:
+                    session_id = get_session_id_fn()
                     if session_id:
                         self.set_session_id(session_id)
         except Exception as e:
@@ -133,7 +135,7 @@ class MCPClient(AsyncMCPClient):
         """
         # Reset connection count
         self._connection_count = 0
-        
+
         # Best-effort: try async close if parent provides it
         if hasattr(self, "close") and inspect.iscoroutinefunction(self.close):
             try:
@@ -143,7 +145,7 @@ class MCPClient(AsyncMCPClient):
 
         # Always cleanup the executor
         self._executor.close()
-        
+
         logger.debug(f"MCP client closed for {self._server_url}")
 
     def __del__(self):

@@ -529,7 +529,7 @@ class LocalConversation(BaseConversation):
 
     def close(self) -> None:
         """Close the conversation and clean up all tool executors.
-        
+
         This method:
         1. Runs session end hooks
         2. Ends observability spans
@@ -563,10 +563,11 @@ class LocalConversation(BaseConversation):
                 continue
             except Exception as e:
                 logger.warning(f"Error closing executor for tool '{tool.name}': {e}")
-        
+
         # Clear global MCP session manager
         try:
             from openhands.sdk.mcp import set_session_manager
+
             set_session_manager(None)
         except ImportError:
             pass  # MCP module not available

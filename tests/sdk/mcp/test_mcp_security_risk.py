@@ -23,7 +23,7 @@ class MockMCPClient(MCPClient):
     @property
     def session_id(self):
         return self._session_id
-    
+
     @property
     def server_url(self):
         return self._server_url

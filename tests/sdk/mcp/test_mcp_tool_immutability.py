@@ -19,11 +19,11 @@ class MockMCPClient(MCPClient):
         self._session_id = None
         self._server_url = None
         self._connection_count = 0
-    
+
     @property
     def session_id(self):
         return self._session_id
-    
+
     @property
     def server_url(self):
         return self._server_url

@@ -42,17 +42,17 @@ def to_camel_case(s: str) -> str:
 
 class MCPToolExecutor(ToolExecutor):
     """Executor for MCP tools with persistent connection support.
-    
+
     This executor maintains a persistent connection to the MCP server
     across multiple tool calls, avoiding the overhead of reconnecting
     and re-authenticating for each call.
-    
+
     The connection is established on the first tool call and reused
     for subsequent calls. The connection is closed when:
     - The executor is explicitly closed via close()
     - The executor is garbage collected
     - An unrecoverable error occurs
-    
+
     Session IDs are tracked to enable session resumption after
     disconnects when integrated with ConversationState.
     """
@@ -63,8 +63,8 @@ class MCPToolExecutor(ToolExecutor):
     _session_manager: "MCPSessionManager | None"
 
     def __init__(
-        self, 
-        tool_name: str, 
+        self,
+        tool_name: str,
         client: MCPClient,
         session_manager: "MCPSessionManager | None" = None,
     ):
@@ -75,7 +75,7 @@ class MCPToolExecutor(ToolExecutor):
 
     async def _ensure_connected(self) -> None:
         """Ensure the MCP client is connected, establishing connection if needed.
-        
+
         This method implements lazy connection establishment - the connection
         is only created on first use and then reused for subsequent calls.
         """
@@ -83,14 +83,13 @@ class MCPToolExecutor(ToolExecutor):
             logger.debug(f"Establishing MCP connection for tool {self.tool_name}")
             await self.client.__aenter__()
             self._connection_established = True
-            
+
             # Update session manager if available
             if self._session_manager and self.client.server_url:
                 self._session_manager.mark_connected(
-                    self.client.server_url,
-                    self.client.session_id
+                    self.client.server_url, self.client.session_id
                 )
-            
+
             logger.info(
                 f"MCP connection established for {self.tool_name}, "
                 f"session_id={self.client.session_id}"
@@ -99,21 +98,20 @@ class MCPToolExecutor(ToolExecutor):
     @observe(name="MCPToolExecutor.call_tool", span_type="TOOL")
     async def call_tool(self, action: MCPToolAction) -> MCPToolObservation:
         """Execute the MCP tool call with persistent connection.
-        
+
         The connection is established on first call and reused for subsequent calls.
         """
         await self._ensure_connected()
-        
+
         if not self.client.is_connected():
             # Connection was lost - try to reconnect
             logger.warning(f"MCP connection lost for {self.tool_name}, reconnecting...")
             self._connection_established = False
             await self._ensure_connected()
-        
+
         try:
             logger.debug(
-                f"Calling MCP tool {self.tool_name} "
-                f"with args: {action.model_dump()}"
+                f"Calling MCP tool {self.tool_name} with args: {action.model_dump()}"
             )
             result: mcp.types.CallToolResult = await self.client.call_tool_mcp(
                 name=self.tool_name, arguments=action.to_mcp_arguments()
@@ -139,10 +137,10 @@ class MCPToolExecutor(ToolExecutor):
         return self.client.call_async_from_sync(
             self.call_tool, action=action, timeout=300
         )
-    
+
     def close(self) -> None:
         """Close the MCP connection and cleanup resources.
-        
+
         This should be called when the conversation ends or when
         the executor is no longer needed.
         """
@@ -157,11 +155,11 @@ class MCPToolExecutor(ToolExecutor):
                 logger.warning(f"Error closing MCP connection: {e}")
             finally:
                 self._connection_established = False
-                
+
                 # Update session manager if available
                 if self._session_manager and self.client.server_url:
                     self._session_manager.mark_disconnected(self.client.server_url)
-    
+
     def __del__(self):
         """Cleanup on deletion."""
         try:
