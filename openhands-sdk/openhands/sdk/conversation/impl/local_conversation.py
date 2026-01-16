@@ -97,7 +97,12 @@ class LocalConversation(BaseConversation):
                       suffix their persistent filestore with this ID.
             callbacks: Optional list of callback functions to handle events
             token_callbacks: Optional list of callbacks invoked for streaming deltas
-            hook_config: Optional hook configuration to auto-wire session hooks
+            hook_config: Optional hook configuration to auto-wire session hooks.
+                Note: In the agent-server API, hook_config is deliberately excluded
+                from StartConversationRequest - hooks can only come from plugins,
+                not directly from API users. This parameter exists in LocalConversation
+                for backward compatibility and advanced local use cases, but the
+                recommended pattern is to use plugin_source instead.
             max_iteration_per_run: Maximum number of iterations per run
             visualizer: Visualization configuration. Can be:
                        - ConversationVisualizerBase subclass: Class to instantiate
