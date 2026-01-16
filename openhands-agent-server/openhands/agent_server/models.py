@@ -109,9 +109,13 @@ class StartConversationRequest(BaseModel):
     plugin_source: str | None = Field(
         default=None,
         description=(
-            "Plugin source to fetch and load for this conversation. Can be "
-            "'github:owner/repo', a git URL, or a local path. The plugin's skills, "
-            "hooks, and MCP configuration will be merged into the conversation."
+            "Plugin source to fetch and load for this conversation. Supports: "
+            "(1) Any git URL for GitHub, GitLab, Bitbucket, Codeberg, self-hosted, etc. "
+            "(e.g., 'https://gitlab.com/org/repo', 'git@bitbucket.org:team/repo.git'); "
+            "(2) GitHub shorthand 'github:owner/repo' as a convenience; "
+            "(3) Local filesystem path (e.g., '/path/to/plugin'). "
+            "The plugin's skills, hooks, and MCP configuration will be merged into "
+            "the conversation."
         ),
     )
     plugin_ref: str | None = Field(

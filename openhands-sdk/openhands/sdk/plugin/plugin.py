@@ -101,8 +101,9 @@ class Plugin(BaseModel):
 
         Args:
             source: Plugin source - can be:
-                - "github:owner/repo" - GitHub repository shorthand
-                - "https://github.com/owner/repo.git" - Full git URL
+                - Any git URL (GitHub, GitLab, Bitbucket, Codeberg, self-hosted, etc.)
+                  e.g., "https://gitlab.com/org/repo", "git@bitbucket.org:team/repo.git"
+                - "github:owner/repo" - GitHub shorthand (convenience syntax)
                 - "/local/path" - Local path (returned as-is)
             cache_dir: Directory for caching. Defaults to ~/.openhands/cache/plugins/
             ref: Optional branch, tag, or commit to checkout.
