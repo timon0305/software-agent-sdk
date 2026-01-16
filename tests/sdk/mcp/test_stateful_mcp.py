@@ -25,7 +25,6 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_context
 
 from openhands.sdk.mcp import create_mcp_tools
-from openhands.sdk.mcp.definition import MCPToolAction
 from openhands.sdk.mcp.tool import MCPToolExecutor
 
 
@@ -70,7 +69,10 @@ class SessionStatefulMCPServer:
             session_id = ctx.session_id if ctx else "unknown"
             token = sessions.get(session_id, {}).get("token")
             if token is None:
-                return f"Session {session_id[:8]}: ERROR - No auth token! Session state was lost!"
+                return (
+                    f"Session {session_id[:8]}: ERROR - "
+                    "No auth token! Session state was lost!"
+                )
             return f"Session {session_id[:8]}: Current auth token is {token}"
 
         @self.mcp.tool()
@@ -83,7 +85,8 @@ class SessionStatefulMCPServer:
             if "counter" not in sessions[session_id]:
                 sessions[session_id]["counter"] = 0
             sessions[session_id]["counter"] += 1
-            return f"Session {session_id[:8]}: Counter is now {sessions[session_id]['counter']}"
+            counter = sessions[session_id]["counter"]
+            return f"Session {session_id[:8]}: Counter is now {counter}"
 
         @self.mcp.tool()
         def get_counter() -> str:
@@ -216,7 +219,7 @@ class TestStatefulMCPSessionPersistence:
         assert "Auth token set to secret-123" in result.text
 
         # Verify auth token persists
-        # WITH OLD CODE: This would fail with "ERROR - No auth token! Session state was lost!"
+        # WITH OLD CODE: This would fail with "ERROR - No auth token!"
         # WITH FIX: Same session is used, token is preserved
         action = get_auth_tool.action_from_arguments({})
         result = get_executor(action)
@@ -249,6 +252,12 @@ class TestStatefulMCPSessionPersistence:
         get_auth = next(t for t in tools if t.name == "get_auth_token")
         increment = next(t for t in tools if t.name == "increment_counter")
         get_counter = next(t for t in tools if t.name == "get_counter")
+
+        # Verify executors exist
+        assert set_auth.executor is not None
+        assert get_auth.executor is not None
+        assert increment.executor is not None
+        assert get_counter.executor is not None
 
         # Simulate realistic workflow:
         # 1. Authenticate
