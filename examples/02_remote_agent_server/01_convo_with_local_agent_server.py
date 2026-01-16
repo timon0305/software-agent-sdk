@@ -132,7 +132,7 @@ llm = LLM(
 )
 title_gen_llm = LLM(
     usage_id="title-gen-llm",
-    model=os.getenv("LLM_MODEL", "openhands/gpt-5-mini-2025-08-07"),
+    model=os.getenv("LLM_MODEL", "openhands/gpt-5.2"),
     base_url=os.getenv("LLM_BASE_URL"),
     api_key=SecretStr(api_key),
 )

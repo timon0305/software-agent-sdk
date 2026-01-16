@@ -112,7 +112,7 @@ class ModelGateLLM(LLM):
 @pytest.mark.parametrize(
     "model, expected",
     [
-        ("gpt-5-mini-2025-08-07", "responses"),  # Responses-capable per model_features
+        ("gpt-5.2", "responses"),  # Responses-capable per model_features
         ("gpt-4o-mini", "completion"),  # Completion path
     ],
 )

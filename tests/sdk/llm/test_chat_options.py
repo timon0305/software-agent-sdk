@@ -45,7 +45,7 @@ def test_opus_4_5_uses_reasoning_effort_and_strips_temp_top_p():
 
 def test_gpt5_uses_reasoning_effort_and_strips_temp_top_p():
     llm = DummyLLM(
-        model="gpt-5-mini-2025-08-07",
+        model="gpt-5.2",
         temperature=0.5,
         top_p=0.8,
         reasoning_effort="high",
