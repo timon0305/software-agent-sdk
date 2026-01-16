@@ -12,10 +12,21 @@ class MockMCPClient(MCPClient):
 
     def __init__(self):
         # Skip the parent constructor to avoid needing transport
-        pass
+        # Initialize the attributes that the real client would have
+        self._session_id = None
+        self._server_url = None
+        self._connection_count = 0
 
     def is_connected(self):
         return True
+
+    @property
+    def session_id(self):
+        return self._session_id
+    
+    @property
+    def server_url(self):
+        return self._server_url
 
     async def call_tool_mcp(  # type: ignore[override]
         self, name: str, arguments: dict
@@ -37,10 +48,11 @@ class MockMCPClient(MCPClient):
         return asyncio.run(wrapper())
 
     async def __aenter__(self):
+        self._connection_count += 1
         return self
 
     async def __aexit__(self, *args):
-        pass
+        self._connection_count -= 1
 
 
 def test_mcp_tool_to_openai_with_security_risk():

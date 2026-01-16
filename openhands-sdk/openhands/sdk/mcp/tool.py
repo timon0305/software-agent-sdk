@@ -41,38 +41,94 @@ def to_camel_case(s: str) -> str:
 
 
 class MCPToolExecutor(ToolExecutor):
-    """Executor for MCP tools."""
+    """Executor for MCP tools with persistent connection support.
+    
+    This executor maintains a persistent connection to the MCP server
+    across multiple tool calls, avoiding the overhead of reconnecting
+    and re-authenticating for each call.
+    
+    The connection is established on the first tool call and reused
+    for subsequent calls. The connection is closed when:
+    - The executor is explicitly closed via close()
+    - The executor is garbage collected
+    - An unrecoverable error occurs
+    
+    Session IDs are tracked to enable session resumption after
+    disconnects when integrated with ConversationState.
+    """
 
     tool_name: str
     client: MCPClient
+    _connection_established: bool
+    _session_manager: "MCPSessionManager | None"
 
-    def __init__(self, tool_name: str, client: MCPClient):
+    def __init__(
+        self, 
+        tool_name: str, 
+        client: MCPClient,
+        session_manager: "MCPSessionManager | None" = None,
+    ):
         self.tool_name = tool_name
         self.client = client
+        self._connection_established = False
+        self._session_manager = session_manager
+
+    async def _ensure_connected(self) -> None:
+        """Ensure the MCP client is connected, establishing connection if needed.
+        
+        This method implements lazy connection establishment - the connection
+        is only created on first use and then reused for subsequent calls.
+        """
+        if not self._connection_established:
+            logger.debug(f"Establishing MCP connection for tool {self.tool_name}")
+            await self.client.__aenter__()
+            self._connection_established = True
+            
+            # Update session manager if available
+            if self._session_manager and self.client.server_url:
+                self._session_manager.mark_connected(
+                    self.client.server_url,
+                    self.client.session_id
+                )
+            
+            logger.info(
+                f"MCP connection established for {self.tool_name}, "
+                f"session_id={self.client.session_id}"
+            )
 
     @observe(name="MCPToolExecutor.call_tool", span_type="TOOL")
     async def call_tool(self, action: MCPToolAction) -> MCPToolObservation:
-        async with self.client:
-            assert self.client.is_connected(), "MCP client is not connected."
-            try:
-                logger.debug(
-                    f"Calling MCP tool {self.tool_name} "
-                    f"with args: {action.model_dump()}"
-                )
-                result: mcp.types.CallToolResult = await self.client.call_tool_mcp(
-                    name=self.tool_name, arguments=action.to_mcp_arguments()
-                )
-                return MCPToolObservation.from_call_tool_result(
-                    tool_name=self.tool_name, result=result
-                )
-            except Exception as e:
-                error_msg = f"Error calling MCP tool {self.tool_name}: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                return MCPToolObservation.from_text(
-                    text=error_msg,
-                    is_error=True,
-                    tool_name=self.tool_name,
-                )
+        """Execute the MCP tool call with persistent connection.
+        
+        The connection is established on first call and reused for subsequent calls.
+        """
+        await self._ensure_connected()
+        
+        if not self.client.is_connected():
+            # Connection was lost - try to reconnect
+            logger.warning(f"MCP connection lost for {self.tool_name}, reconnecting...")
+            self._connection_established = False
+            await self._ensure_connected()
+        
+        try:
+            logger.debug(
+                f"Calling MCP tool {self.tool_name} "
+                f"with args: {action.model_dump()}"
+            )
+            result: mcp.types.CallToolResult = await self.client.call_tool_mcp(
+                name=self.tool_name, arguments=action.to_mcp_arguments()
+            )
+            return MCPToolObservation.from_call_tool_result(
+                tool_name=self.tool_name, result=result
+            )
+        except Exception as e:
+            error_msg = f"Error calling MCP tool {self.tool_name}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return MCPToolObservation.from_text(
+                text=error_msg,
+                is_error=True,
+                tool_name=self.tool_name,
+            )
 
     def __call__(
         self,
@@ -83,6 +139,40 @@ class MCPToolExecutor(ToolExecutor):
         return self.client.call_async_from_sync(
             self.call_tool, action=action, timeout=300
         )
+    
+    def close(self) -> None:
+        """Close the MCP connection and cleanup resources.
+        
+        This should be called when the conversation ends or when
+        the executor is no longer needed.
+        """
+        if self._connection_established:
+            logger.debug(f"Closing MCP connection for tool {self.tool_name}")
+            try:
+                # Exit the context manager properly
+                self.client.call_async_from_sync(
+                    self.client.__aexit__, None, None, None, timeout=10.0
+                )
+            except Exception as e:
+                logger.warning(f"Error closing MCP connection: {e}")
+            finally:
+                self._connection_established = False
+                
+                # Update session manager if available
+                if self._session_manager and self.client.server_url:
+                    self._session_manager.mark_disconnected(self.client.server_url)
+    
+    def __del__(self):
+        """Cleanup on deletion."""
+        try:
+            self.close()
+        except Exception:
+            pass  # Ignore cleanup errors during deletion
+
+
+# Import here to avoid circular import
+if TYPE_CHECKING:
+    from openhands.sdk.mcp.session_manager import MCPSessionManager
 
 
 _mcp_dynamic_action_type: dict[str, type[Schema]] = {}

@@ -15,7 +15,18 @@ class MockMCPClient(MCPClient):
 
     def __init__(self):
         # Skip the parent constructor to avoid needing transport
-        pass
+        # Initialize the attributes that the real client would have
+        self._session_id = None
+        self._server_url = None
+        self._connection_count = 0
+    
+    @property
+    def session_id(self):
+        return self._session_id
+    
+    @property
+    def server_url(self):
+        return self._server_url
 
 
 class TestMCPToolImmutability:
