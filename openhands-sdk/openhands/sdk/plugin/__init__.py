@@ -12,6 +12,7 @@ from openhands.sdk.plugin.types import (
     PluginAuthor,
     PluginManifest,
 )
+from openhands.sdk.plugin.utils import merge_mcp_configs, merge_skills
 
 
 __all__ = [
@@ -21,4 +22,6 @@ __all__ = [
     "PluginAuthor",
     "AgentDefinition",
     "CommandDefinition",
+    "merge_mcp_configs",
+    "merge_skills",
 ]

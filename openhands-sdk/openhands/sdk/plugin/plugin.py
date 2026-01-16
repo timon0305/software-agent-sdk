@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from openhands.sdk.context import AgentContext
 from openhands.sdk.context.skills import Skill
 from openhands.sdk.context.skills.utils import (
     discover_skill_resources,
@@ -23,6 +24,7 @@ from openhands.sdk.plugin.types import (
     PluginAuthor,
     PluginManifest,
 )
+from openhands.sdk.plugin.utils import merge_mcp_configs, merge_skills
 
 
 logger = get_logger(__name__)
@@ -83,6 +85,61 @@ class Plugin(BaseModel):
     def description(self) -> str:
         """Get the plugin description."""
         return self.manifest.description
+
+    def merge_into(
+        self,
+        agent_context: AgentContext | None = None,
+        mcp_config: dict[str, Any] | None = None,
+        max_skills: int | None = None,
+    ) -> tuple[AgentContext, dict[str, Any]]:
+        """Merge this plugin's content into agent context and MCP config.
+
+        This is the canonical way to apply a plugin's skills and MCP configuration
+        to an agent's runtime context.
+
+        Args:
+            agent_context: Existing agent context (or None)
+            mcp_config: Existing MCP config (or None)
+            max_skills: Optional max total skills (raises ValueError if exceeded)
+
+        Returns:
+            Tuple of (merged_agent_context, merged_mcp_config)
+
+        Raises:
+            ValueError: If max_skills limit would be exceeded
+
+        Example:
+            >>> plugin = Plugin.load(Plugin.fetch("github:owner/plugin"))
+            >>> new_context, new_mcp = plugin.merge_into(
+            ...     agent.agent_context,
+            ...     agent.mcp_config,
+            ...     max_skills=100
+            ... )
+            >>> agent = agent.model_copy(
+            ...     update={"agent_context": new_context, "mcp_config": new_mcp}
+            ... )
+        """
+        # Check skill limit if specified
+        if max_skills is not None and self.skills:
+            # Count unique skills after merge (since plugins can override)
+            skills_by_name = {}
+            if agent_context and agent_context.skills:
+                skills_by_name = {s.name: s for s in agent_context.skills}
+            for skill in self.skills:
+                skills_by_name[skill.name] = skill
+
+            if len(skills_by_name) > max_skills:
+                raise ValueError(
+                    f"Plugin has too many skills ({len(skills_by_name)} > {max_skills})"
+                )
+
+        # Merge skills
+        merged_context = merge_skills(agent_context, self.skills)
+
+        # Merge MCP config
+        merged_mcp = merge_mcp_configs(mcp_config, self.mcp_config)
+
+        return merged_context, merged_mcp
 
     @classmethod
     def fetch(
