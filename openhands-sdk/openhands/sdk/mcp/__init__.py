@@ -3,11 +3,6 @@
 from openhands.sdk.mcp.client import MCPClient
 from openhands.sdk.mcp.definition import MCPToolAction, MCPToolObservation
 from openhands.sdk.mcp.exceptions import MCPError, MCPTimeoutError
-from openhands.sdk.mcp.session_manager import (
-    MCPSessionManager,
-    get_session_manager,
-    set_session_manager,
-)
 from openhands.sdk.mcp.tool import (
     MCPToolDefinition,
     MCPToolExecutor,
@@ -23,9 +18,6 @@ __all__ = [
     "MCPToolAction",
     "MCPToolObservation",
     "MCPToolExecutor",
-    "MCPSessionManager",
-    "get_session_manager",
-    "set_session_manager",
     "create_mcp_tools",
     "MCPError",
     "MCPTimeoutError",

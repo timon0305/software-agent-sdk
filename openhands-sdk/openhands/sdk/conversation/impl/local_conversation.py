@@ -528,14 +528,7 @@ class LocalConversation(BaseConversation):
             self._state.security_analyzer = analyzer
 
     def close(self) -> None:
-        """Close the conversation and clean up all tool executors.
-
-        This method:
-        1. Runs session end hooks
-        2. Ends observability spans
-        3. Closes all tool executors (including MCP connections)
-        4. Clears the global MCP session manager
-        """
+        """Close the conversation and clean up all tool executors."""
         # Use getattr for safety - object may be partially constructed
         if getattr(self, "_cleanup_initiated", False):
             return
@@ -563,14 +556,6 @@ class LocalConversation(BaseConversation):
                 continue
             except Exception as e:
                 logger.warning(f"Error closing executor for tool '{tool.name}': {e}")
-
-        # Clear global MCP session manager
-        try:
-            from openhands.sdk.mcp import set_session_manager
-
-            set_session_manager(None)
-        except ImportError:
-            pass  # MCP module not available
 
     def ask_agent(self, question: str) -> str:
         """Ask the agent a simple, stateless question and get a direct LLM response.

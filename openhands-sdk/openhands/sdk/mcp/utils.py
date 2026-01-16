@@ -32,21 +32,30 @@ async def log_handler(message: LogMessage):
     logger.log(level, msg, extra=extra)
 
 
-async def _list_tools(client: MCPClient) -> list[ToolDefinition]:
-    """List tools from an MCP client."""
+async def _list_tools_and_keep_connected(client: MCPClient) -> list[ToolDefinition]:
+    """List tools from MCP client and keep connection open.
+
+    Unlike the old approach that closed the connection after listing,
+    this keeps the connection open so subsequent tool calls can reuse it.
+    The connection should be closed via client.sync_close() when done.
+    """
     tools: list[ToolDefinition] = []
 
-    async with client:
-        assert client.is_connected(), "MCP client is not connected."
-        mcp_type_tools: list[mcp.types.Tool] = await client.list_tools()
-        for mcp_tool in mcp_type_tools:
-            tool_sequence = MCPToolDefinition.create(
-                mcp_tool=mcp_tool, mcp_client=client
-            )
-            tools.extend(tool_sequence)  # Flatten sequence into list
-    assert not client.is_connected(), (
-        "MCP client should be disconnected after listing tools."
-    )
+    # Enter the context manager to establish connection
+    await client.__aenter__()
+
+    if not client.is_connected():
+        raise RuntimeError("MCP client failed to connect")
+
+    mcp_type_tools: list[mcp.types.Tool] = await client.list_tools()
+    for mcp_tool in mcp_type_tools:
+        tool_sequence = MCPToolDefinition.create(mcp_tool=mcp_tool, mcp_client=client)
+        tools.extend(tool_sequence)
+
+    # NOTE: We intentionally do NOT call __aexit__ here.
+    # The connection stays open for subsequent tool calls.
+    # It will be closed when client.sync_close() is called.
+
     return tools
 
 
@@ -54,16 +63,23 @@ def create_mcp_tools(
     config: dict | MCPConfig,
     timeout: float = 30.0,
 ) -> list[MCPToolDefinition]:
-    """Create MCP tools from MCP configuration."""
+    """Create MCP tools from MCP configuration.
+
+    The returned tools share a persistent MCP client connection.
+    Call close() on any tool's executor when done to clean up.
+    """
     tools: list[MCPToolDefinition] = []
     if isinstance(config, dict):
         config = MCPConfig.model_validate(config)
     client = MCPClient(config, log_handler=log_handler)
 
     try:
-        tools = client.call_async_from_sync(_list_tools, timeout=timeout, client=client)
+        tools = client.call_async_from_sync(
+            _list_tools_and_keep_connected, timeout=timeout, client=client
+        )
     except TimeoutError as e:
-        # Extract server names from config for better error message
+        # Clean up on timeout
+        client.sync_close()
         server_names = (
             list(config.mcpServers.keys()) if config.mcpServers else ["unknown"]
         )
@@ -78,6 +94,10 @@ def create_mcp_tools(
         raise MCPTimeoutError(
             error_msg, timeout=timeout, config=config.model_dump()
         ) from e
+    except Exception:
+        # Clean up on any error
+        client.sync_close()
+        raise
 
     logger.info(f"Created {len(tools)} MCP tools: {[t.name for t in tools]}")
     return tools

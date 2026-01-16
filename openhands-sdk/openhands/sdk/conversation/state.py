@@ -122,13 +122,6 @@ class ConversationState(OpenHandsModel):
         description="Registry for handling secrets and sensitive data",
     )
 
-    # MCP session state for maintaining persistent connections
-    mcp_sessions: dict[str, str] = Field(
-        default_factory=dict,
-        description="MCP session IDs per server URL for session persistence. "
-        "Maps server URL to session ID to enable session resumption.",
-    )
-
     # ===== Private attrs (NOT Fields) =====
     _fs: FileStore = PrivateAttr()  # filestore for persistence
     _events: EventLog = PrivateAttr()  # now the storage for events
