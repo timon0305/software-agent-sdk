@@ -1412,7 +1412,9 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(
+            request, mock_plugin
+        )
 
         # Verify skills were added
         assert result.agent.agent_context is not None
@@ -1444,7 +1446,9 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(
+            request, mock_plugin
+        )
 
         # Verify skills were merged correctly
         assert result.agent.agent_context is not None
@@ -1470,7 +1474,9 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(
+            request, mock_plugin
+        )
 
         # Verify MCP config was merged
         assert result.agent.mcp_config is not None

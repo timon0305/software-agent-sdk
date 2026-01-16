@@ -220,7 +220,7 @@ class ConversationService:
             request: The original start conversation request with plugin_source set
 
         Returns:
-            Tuple of (updated request with plugin content merged, hook_config from plugin)
+            Tuple of (updated request with merged content, hook_config from plugin)
 
         Raises:
             PluginFetchError: If the plugin cannot be fetched or loaded
@@ -317,7 +317,7 @@ class ConversationService:
             plugin: The loaded plugin
 
         Returns:
-            Tuple of (updated request with plugin content merged, hook_config from plugin)
+            Tuple of (updated request with merged content, hook_config from plugin)
 
         Raises:
             PluginFetchError: If the plugin exceeds resource limits
