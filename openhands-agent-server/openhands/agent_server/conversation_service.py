@@ -27,7 +27,6 @@ from openhands.sdk.conversation.state import (
     ConversationState,
 )
 from openhands.sdk.hooks import HookConfig
-from openhands.sdk.hooks.config import HookMatcher
 from openhands.sdk.plugin import Plugin, PluginFetchError
 from openhands.sdk.utils.cipher import Cipher
 
@@ -206,7 +205,7 @@ class ConversationService:
 
     def _load_and_merge_plugin(
         self, request: StartConversationRequest
-    ) -> StartConversationRequest:
+    ) -> tuple[StartConversationRequest, HookConfig | None]:
         """Fetch and load a plugin, merging its content into the request.
 
         This method:
@@ -221,13 +220,13 @@ class ConversationService:
             request: The original start conversation request with plugin_source set
 
         Returns:
-            Updated request with plugin content merged into the agent
+            Tuple of (updated request with plugin content merged, hook_config from plugin)
 
         Raises:
             PluginFetchError: If the plugin cannot be fetched or loaded
         """
         if not request.plugin_source or not request.plugin_source.strip():
-            return request
+            return request, None
 
         try:
             # Validate plugin_path for path traversal and absolute path attacks
@@ -308,65 +307,23 @@ class ConversationService:
             return existing_context.model_copy(update={"skills": merged_skills})
         return AgentContext(skills=merged_skills)
 
-    def _merge_hook_configs(
-        self,
-        base_config: HookConfig | None,
-        plugin_config: HookConfig | None,
-    ) -> HookConfig | None:
-        """Merge plugin hooks into base hook configuration using additive semantics.
-
-        Unlike skill merging (replacement), hooks are concatenated so multiple handlers
-        can respond to the same event. Base hooks run first, then plugin hooks.
-
-        Note: OpenHands executes hooks sequentially with early-exit on block, so base
-        hooks get "first say" on PreToolUse blocking decisions.
-
-        Args:
-            base_config: Existing hook configuration from the request (may be None)
-            plugin_config: Hook configuration from the loaded plugin (may be None)
-
-        Returns:
-            Merged HookConfig, or None if both inputs are None
-        """
-        if base_config is None and plugin_config is None:
-            return None
-        if base_config is None:
-            return plugin_config
-        if plugin_config is None:
-            return base_config
-
-        # Merge hooks by event type, concatenating matcher lists
-        # Base matchers come first, plugin matchers are appended
-        merged_hooks: dict[str, list[HookMatcher]] = {}
-
-        all_event_types = set(base_config.hooks.keys()) | set(
-            plugin_config.hooks.keys()
-        )
-
-        for event_type in all_event_types:
-            base_matchers = base_config.hooks.get(event_type, [])
-            plugin_matchers = plugin_config.hooks.get(event_type, [])
-            merged_hooks[event_type] = base_matchers + plugin_matchers
-
-        return HookConfig(hooks=merged_hooks)
-
     def _merge_plugin_into_request(
         self, request: StartConversationRequest, plugin: Plugin
-    ) -> StartConversationRequest:
-        """Merge plugin skills, hooks, and MCP config into the request.
+    ) -> tuple[StartConversationRequest, HookConfig | None]:
+        """Merge plugin skills and MCP config into the request, extract hooks.
 
         Args:
             request: The original start conversation request
             plugin: The loaded plugin
 
         Returns:
-            Updated request with plugin content merged
+            Tuple of (updated request with plugin content merged, hook_config from plugin)
 
         Raises:
             PluginFetchError: If the plugin exceeds resource limits
         """
         if not plugin.skills and not plugin.mcp_config and not plugin.hooks:
-            return request
+            return request, None
 
         # Validate skill count limit
         if plugin.skills and len(plugin.skills) > MAX_PLUGIN_SKILLS:
@@ -391,17 +348,15 @@ class ConversationService:
             update={"agent_context": new_agent_context, "mcp_config": new_mcp_config}
         )
 
-        # Merge hooks and log
-        new_hook_config = self._merge_hook_configs(request.hook_config, plugin.hooks)
+        # Log hooks if present
         if plugin.hooks:
             logger.info(
-                f"Merged hooks from plugin '{plugin.name}': "
+                f"Loaded hooks from plugin '{plugin.name}': "
                 f"{list(plugin.hooks.hooks.keys())} event types"
             )
 
-        return request.model_copy(
-            update={"agent": updated_agent, "hook_config": new_hook_config}
-        )
+        updated_request = request.model_copy(update={"agent": updated_agent})
+        return updated_request, plugin.hooks
 
     # Write Methods
 
@@ -448,10 +403,15 @@ class ConversationService:
                 )
 
         # Load plugin if specified (run in thread pool to avoid blocking event loop)
+        hook_config = None
         if request.plugin_source:
-            request = await asyncio.to_thread(self._load_and_merge_plugin, request)
+            request, hook_config = await asyncio.to_thread(
+                self._load_and_merge_plugin, request
+            )
 
-        stored = StoredConversation(id=conversation_id, **request.model_dump())
+        stored = StoredConversation(
+            id=conversation_id, hook_config=hook_config, **request.model_dump()
+        )
         event_service = await self._start_event_service(stored)
         initial_message = request.initial_message
         if initial_message:

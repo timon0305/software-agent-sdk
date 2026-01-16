@@ -1412,7 +1412,7 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
 
         # Verify skills were added
         assert result.agent.agent_context is not None
@@ -1444,7 +1444,7 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
 
         # Verify skills were merged correctly
         assert result.agent.agent_context is not None
@@ -1470,7 +1470,7 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result = conversation_service._merge_plugin_into_request(request, mock_plugin)
+        result, _ = conversation_service._merge_plugin_into_request(request, mock_plugin)
 
         # Verify MCP config was merged
         assert result.agent.mcp_config is not None
@@ -1501,10 +1501,14 @@ class TestPluginLoading:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result = conversation_service._merge_plugin_into_request(request, empty_plugin)
+        result, hook_config = conversation_service._merge_plugin_into_request(
+            request, empty_plugin
+        )
 
         # Request should be unchanged - agent_context stays None
         assert result.agent.agent_context is None
+        # No hooks from empty plugin
+        assert hook_config is None
         # mcp_config may default to {} in Agent, so check it wasn't modified from plugin
         # The key point is no plugin content was added
 
@@ -1524,7 +1528,7 @@ class TestPluginLoading:
             plugin_path="plugins/sub-plugin",
         )
 
-        result = conversation_service._load_and_merge_plugin(request)
+        result, hook_config = conversation_service._load_and_merge_plugin(request)
 
         # Verify Plugin.fetch was called with correct args
         mock_plugin_class.fetch.assert_called_once_with(
@@ -1555,7 +1559,7 @@ class TestPluginLoading:
             plugin_ref="v1.0.0",
         )
 
-        result = conversation_service._load_and_merge_plugin(request)
+        result, hook_config = conversation_service._load_and_merge_plugin(request)
 
         # Verify Plugin.fetch was called with subpath=None
         mock_plugin_class.fetch.assert_called_once_with(
@@ -1616,10 +1620,11 @@ class TestPluginLoading:
             plugin_source=None,
         )
 
-        result = conversation_service._load_and_merge_plugin(request)
+        result, hook_config = conversation_service._load_and_merge_plugin(request)
 
         # Request should be unchanged
         assert result is request
+        assert hook_config is None
 
     def test_load_and_merge_plugin_whitespace_source(self, conversation_service):
         """Test that plugin loading is skipped for whitespace-only source."""
@@ -1629,10 +1634,11 @@ class TestPluginLoading:
             plugin_source="   ",  # Whitespace-only
         )
 
-        result = conversation_service._load_and_merge_plugin(request)
+        result, hook_config = conversation_service._load_and_merge_plugin(request)
 
         # Request should be unchanged (whitespace-only treated same as empty)
         assert result is request
+        assert hook_config is None
 
     def test_load_and_merge_plugin_path_traversal(self, conversation_service):
         """Test that plugin loading fails for path traversal attempts."""
@@ -1773,13 +1779,13 @@ class TestPluginLoading:
         )
 
         # Should not raise
-        result = conversation_service._merge_plugin_into_request(request, plugin)
+        result, _ = conversation_service._merge_plugin_into_request(request, plugin)
         assert len(result.agent.agent_context.skills) == MAX_PLUGIN_SKILLS
 
-    def test_merge_plugin_with_hooks_merges_into_request(
+    def test_merge_plugin_with_hooks_returns_hook_config(
         self, conversation_service, caplog
     ):
-        """Test that plugin hooks are merged into the request's hook_config."""
+        """Test that plugin hooks are returned separately from the request."""
         import logging
 
         from openhands.sdk.hooks import HookConfig
@@ -1818,22 +1824,24 @@ class TestPluginLoading:
         )
 
         with caplog.at_level(logging.INFO):
-            result = conversation_service._merge_plugin_into_request(
-                request, plugin_with_hooks
+            updated_request, hook_config = (
+                conversation_service._merge_plugin_into_request(
+                    request, plugin_with_hooks
+                )
             )
 
-        # Verify hooks were merged
-        assert result.hook_config is not None
-        assert "PreToolUse" in result.hook_config.hooks
-        assert len(result.hook_config.hooks["PreToolUse"]) == 1
-        assert result.hook_config.hooks["PreToolUse"][0].matcher == "terminal"
-        # Verify info was logged about hook merging
-        assert "Merged hooks" in caplog.text
+        # Verify hooks were returned
+        assert hook_config is not None
+        assert "PreToolUse" in hook_config.hooks
+        assert len(hook_config.hooks["PreToolUse"]) == 1
+        assert hook_config.hooks["PreToolUse"][0].matcher == "terminal"
+        # Verify info was logged about hook loading
+        assert "Loaded hooks" in caplog.text
 
-    def test_merge_plugin_with_only_hooks_updates_request(
+    def test_merge_plugin_with_only_hooks_returns_hook_config(
         self, conversation_service, caplog
     ):
-        """Test plugin with only hooks properly updates request.hook_config."""
+        """Test plugin with only hooks returns hook_config separately."""
         import logging
 
         from openhands.sdk.hooks import HookConfig
@@ -1870,32 +1878,21 @@ class TestPluginLoading:
         )
 
         with caplog.at_level(logging.INFO):
-            result = conversation_service._merge_plugin_into_request(
-                request, plugin_only_hooks
+            updated_request, hook_config = (
+                conversation_service._merge_plugin_into_request(
+                    request, plugin_only_hooks
+                )
             )
 
-        # Request should have hook_config updated
-        assert result.hook_config is not None
-        assert "PostToolUse" in result.hook_config.hooks
+        # Hook config should be returned separately
+        assert hook_config is not None
+        assert "PostToolUse" in hook_config.hooks
         # Agent should remain unchanged (no skills/mcp)
-        assert result.agent.agent_context is None
+        assert updated_request.agent.agent_context is None
 
 
-class TestHookConfigMerging:
-    """Test cases for hook configuration merging.
-
-    These tests verify the additive (concatenation) semantics for hooks,
-    which differs from skill merging (replacement semantics).
-
-    Design rationale: Hooks are event handlers where multiple handlers
-    running for the same event is valid (e.g., one for logging, another
-    for validation). This follows Claude Code's documented behavior.
-
-    Note: OpenHands executes hooks SEQUENTIALLY with early-exit semantics,
-    while Claude Code executes hooks IN PARALLEL. This means:
-    - In OpenHands, order matters for PreToolUse blocking decisions
-    - Base hooks get "first say" on blocking
-    """
+class TestPluginMcpConfig:
+    """Test cases for plugin MCP config and skill merging."""
 
     @pytest.fixture
     def conversation_service(self):
@@ -1906,282 +1903,6 @@ class TestHookConfigMerging:
             )
             service._event_services = {}
             yield service
-
-    def test_merge_hook_configs_both_none(self, conversation_service):
-        """Test merging when both configs are None returns None."""
-        result = conversation_service._merge_hook_configs(None, None)
-        assert result is None
-
-    def test_merge_hook_configs_base_none(self, conversation_service):
-        """Test merging when base is None returns plugin config."""
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        plugin_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="terminal",
-                        hooks=[HookDefinition(command="plugin-hook.sh")],
-                    )
-                ]
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(None, plugin_config)
-
-        assert result is plugin_config
-
-    def test_merge_hook_configs_plugin_none(self, conversation_service):
-        """Test merging when plugin is None returns base config."""
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        base_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="*",
-                        hooks=[HookDefinition(command="base-hook.sh")],
-                    )
-                ]
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(base_config, None)
-
-        assert result is base_config
-
-    def test_merge_hook_configs_concatenates_same_event_type(
-        self, conversation_service
-    ):
-        """Test that hooks for the same event type are concatenated, not replaced.
-
-        This is the key difference from skill merging - hooks use additive semantics.
-        """
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        base_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="terminal",
-                        hooks=[HookDefinition(command="base-security.sh")],
-                    ),
-                    HookMatcher(
-                        matcher="file_editor",
-                        hooks=[HookDefinition(command="base-validate.sh")],
-                    ),
-                ]
-            }
-        )
-
-        plugin_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="*",
-                        hooks=[HookDefinition(command="plugin-log.sh")],
-                    )
-                ]
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(base_config, plugin_config)
-
-        # Should have 3 matchers: 2 from base + 1 from plugin
-        assert len(result.hooks["PreToolUse"]) == 3
-        # Base hooks should come first (important for sequential execution)
-        assert result.hooks["PreToolUse"][0].matcher == "terminal"
-        assert result.hooks["PreToolUse"][1].matcher == "file_editor"
-        assert result.hooks["PreToolUse"][2].matcher == "*"
-
-    def test_merge_hook_configs_combines_different_event_types(
-        self, conversation_service
-    ):
-        """Test that different event types from both configs are combined."""
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        base_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="*",
-                        hooks=[HookDefinition(command="base-pre.sh")],
-                    )
-                ],
-                "SessionStart": [
-                    HookMatcher(hooks=[HookDefinition(command="base-init.sh")])
-                ],
-            }
-        )
-
-        plugin_config = HookConfig(
-            hooks={
-                "PostToolUse": [
-                    HookMatcher(
-                        matcher="*",
-                        hooks=[HookDefinition(command="plugin-post.sh")],
-                    )
-                ],
-                "Stop": [HookMatcher(hooks=[HookDefinition(command="plugin-stop.sh")])],
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(base_config, plugin_config)
-
-        # Should have all 4 event types
-        assert set(result.hooks.keys()) == {
-            "PreToolUse",
-            "SessionStart",
-            "PostToolUse",
-            "Stop",
-        }
-        # Each should have 1 matcher
-        assert len(result.hooks["PreToolUse"]) == 1
-        assert len(result.hooks["SessionStart"]) == 1
-        assert len(result.hooks["PostToolUse"]) == 1
-        assert len(result.hooks["Stop"]) == 1
-
-    def test_merge_hook_configs_preserves_order_for_blocking(
-        self, conversation_service
-    ):
-        """Test that base hooks come before plugin hooks.
-
-        This order matters in OpenHands because hooks execute sequentially
-        with early-exit on block. Base hooks get "first say" on blocking.
-        """
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        base_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="terminal",
-                        hooks=[HookDefinition(command="security-check.sh", timeout=5)],
-                    )
-                ]
-            }
-        )
-
-        plugin_config = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="terminal",
-                        hooks=[HookDefinition(command="plugin-validator.sh")],
-                    )
-                ]
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(base_config, plugin_config)
-
-        # Both matchers target "terminal", but base should be first
-        matchers = result.hooks["PreToolUse"]
-        assert len(matchers) == 2
-        assert matchers[0].hooks[0].command == "security-check.sh"  # Base first
-        assert matchers[1].hooks[0].command == "plugin-validator.sh"  # Plugin second
-
-    def test_merge_hook_configs_empty_hooks_dict(self, conversation_service):
-        """Test merging configs where one has empty hooks dict."""
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-
-        base_config = HookConfig(hooks={})
-
-        plugin_config = HookConfig(
-            hooks={
-                "PostToolUse": [
-                    HookMatcher(
-                        matcher="*",
-                        hooks=[HookDefinition(command="log.sh")],
-                    )
-                ]
-            }
-        )
-
-        result = conversation_service._merge_hook_configs(base_config, plugin_config)
-
-        assert "PostToolUse" in result.hooks
-        assert len(result.hooks["PostToolUse"]) == 1
-
-    def test_merge_plugin_into_request_merges_hooks_with_existing(
-        self, conversation_service
-    ):
-        """Test that plugin hooks merge with request's existing hook_config."""
-        from openhands.sdk.hooks import HookConfig
-        from openhands.sdk.hooks.config import HookDefinition, HookMatcher
-        from openhands.sdk.plugin import Plugin
-        from openhands.sdk.plugin.types import PluginManifest
-
-        # Request has existing hooks
-        existing_hooks = HookConfig(
-            hooks={
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="terminal",
-                        hooks=[HookDefinition(command="project-security.sh")],
-                    )
-                ]
-            }
-        )
-
-        request = StartConversationRequest(
-            agent=Agent(llm=LLM(model="gpt-4", usage_id="test-llm"), tools=[]),
-            workspace=LocalWorkspace(working_dir="/tmp/test"),
-            hook_config=existing_hooks,
-        )
-
-        # Plugin also has PreToolUse hooks
-        plugin = Plugin(
-            manifest=PluginManifest(
-                name="test-plugin",
-                version="1.0.0",
-                description="Test",
-            ),
-            path="/tmp/test",
-            skills=[],
-            hooks=HookConfig(
-                hooks={
-                    "PreToolUse": [
-                        HookMatcher(
-                            matcher="*",
-                            hooks=[HookDefinition(command="plugin-audit.sh")],
-                        )
-                    ],
-                    "PostToolUse": [
-                        HookMatcher(
-                            matcher="*",
-                            hooks=[HookDefinition(command="plugin-log.sh")],
-                        )
-                    ],
-                }
-            ),
-            mcp_config=None,
-            agents=[],
-            commands=[],
-        )
-
-        result = conversation_service._merge_plugin_into_request(request, plugin)
-
-        # PreToolUse should have 2 matchers (1 existing + 1 plugin)
-        assert len(result.hook_config.hooks["PreToolUse"]) == 2
-        # Existing should be first
-        assert (
-            result.hook_config.hooks["PreToolUse"][0].hooks[0].command
-            == "project-security.sh"
-        )
-        # Plugin should be second
-        assert (
-            result.hook_config.hooks["PreToolUse"][1].hooks[0].command
-            == "plugin-audit.sh"
-        )
-        # PostToolUse should have 1 matcher (only from plugin)
-        assert len(result.hook_config.hooks["PostToolUse"]) == 1
 
     def test_merge_plugin_mcp_config_overrides_same_key(self, conversation_service):
         """Test that plugin MCP config overrides existing config with same key."""
@@ -2217,7 +1938,7 @@ class TestHookConfigMerging:
             workspace=LocalWorkspace(working_dir="/tmp/test"),
         )
 
-        result = conversation_service._merge_plugin_into_request(request, plugin)
+        result, _ = conversation_service._merge_plugin_into_request(request, plugin)
 
         # Plugin config should override existing with same key
         assert result.agent.mcp_config["shared-server"]["command"] == "new-command"

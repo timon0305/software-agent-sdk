@@ -127,20 +127,23 @@ class StartConversationRequest(BaseModel):
         default=None,
         description="Optional subdirectory path within the plugin repository.",
     )
-    hook_config: HookConfig | None = Field(
-        default=None,
-        description=(
-            "Hook configuration for this conversation. Hooks are shell scripts that "
-            "run at key lifecycle events (PreToolUse, PostToolUse, UserPromptSubmit, "
-            "Stop, etc.). When a plugin is loaded, its hooks are merged with this "
-            "configuration using additive semantics (both run)."
-        ),
-    )
 
 
 class StoredConversation(StartConversationRequest):
-    """Stored details about a conversation"""
+    """Stored details about a conversation.
 
+    Extends StartConversationRequest with server-assigned fields and
+    fields populated during plugin loading (like hook_config).
+    """
+
+    hook_config: HookConfig | None = Field(
+        default=None,
+        description=(
+            "Hook configuration for this conversation, populated from loaded plugins. "
+            "Hooks are shell scripts that run at key lifecycle events (PreToolUse, "
+            "PostToolUse, UserPromptSubmit, Stop, etc.)."
+        ),
+    )
     id: OpenHandsUUID
     title: str | None = Field(
         default=None, description="User-defined title for the conversation"
