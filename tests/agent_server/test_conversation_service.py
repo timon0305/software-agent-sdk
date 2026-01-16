@@ -7,7 +7,10 @@ from uuid import uuid4
 import pytest
 from pydantic import SecretStr
 
-from openhands.agent_server.conversation_service import ConversationService
+from openhands.agent_server.conversation_service import (
+    MAX_PLUGIN_SKILLS,
+    ConversationService,
+)
 from openhands.agent_server.event_service import EventService
 from openhands.agent_server.models import (
     ConversationPage,
@@ -1663,6 +1666,22 @@ class TestPluginLoading:
         ):
             conversation_service._load_and_merge_plugin(request)
 
+    def test_load_and_merge_plugin_absolute_path(self, conversation_service):
+        """Test that plugin loading fails for absolute path attempts."""
+        from openhands.sdk.plugin import PluginFetchError
+
+        request = StartConversationRequest(
+            agent=Agent(llm=LLM(model="gpt-4", usage_id="test-llm"), tools=[]),
+            workspace=LocalWorkspace(working_dir="/tmp/test"),
+            plugin_source="github:test/plugin",
+            plugin_path="/etc/passwd",  # Absolute path attempt
+        )
+
+        with pytest.raises(
+            PluginFetchError, match="must be a relative path, not absolute"
+        ):
+            conversation_service._load_and_merge_plugin(request)
+
     @patch("openhands.agent_server.conversation_service.Plugin")
     def test_load_and_merge_plugin_error_includes_exception_type(
         self, mock_plugin_class, conversation_service
@@ -1695,7 +1714,7 @@ class TestPluginLoading:
         # Create a plugin with more than MAX_PLUGIN_SKILLS skills
         too_many_skills = [
             Skill(name=f"skill-{i}", content=f"Skill {i} content")
-            for i in range(conversation_service.MAX_PLUGIN_SKILLS + 1)
+            for i in range(MAX_PLUGIN_SKILLS + 1)
         ]
 
         plugin = Plugin(
@@ -1731,7 +1750,7 @@ class TestPluginLoading:
         # Create a plugin with exactly MAX_PLUGIN_SKILLS skills
         max_skills = [
             Skill(name=f"skill-{i}", content=f"Skill {i} content")
-            for i in range(conversation_service.MAX_PLUGIN_SKILLS)
+            for i in range(MAX_PLUGIN_SKILLS)
         ]
 
         plugin = Plugin(
@@ -1755,10 +1774,7 @@ class TestPluginLoading:
 
         # Should not raise
         result = conversation_service._merge_plugin_into_request(request, plugin)
-        assert (
-            len(result.agent.agent_context.skills)
-            == conversation_service.MAX_PLUGIN_SKILLS
-        )
+        assert len(result.agent.agent_context.skills) == MAX_PLUGIN_SKILLS
 
     def test_merge_plugin_with_hooks_merges_into_request(
         self, conversation_service, caplog

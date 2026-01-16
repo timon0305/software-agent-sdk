@@ -1,9 +1,9 @@
 import asyncio
 import importlib
 import logging
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
 from uuid import UUID, uuid4
 
 import httpx
@@ -47,15 +47,19 @@ def _compose_conversation_info(
     )
 
 
+# Defense-in-depth limit against malicious REST API calls with oversized plugins.
+# This is an arbitrary limit that catches the most obvious DoS vector (skill count).
+# Note: This protection is incomplete - we don't limit hook count, skill file sizes,
+# or MCP config complexity. A more comprehensive resource limiting strategy is needed.
+MAX_PLUGIN_SKILLS = 100
+
+
 @dataclass
 class ConversationService:
     """
     Conversation service which stores to a local file store. When the context starts
     all event_services are loaded into memory, and stored when it stops.
     """
-
-    # Resource limits to prevent DoS from malicious plugins
-    MAX_PLUGIN_SKILLS: ClassVar[int] = 100
 
     conversations_dir: Path = field()
     webhook_specs: list[WebhookSpec] = field(default_factory=list)
@@ -226,9 +230,13 @@ class ConversationService:
             return request
 
         try:
-            # Validate plugin_path for path traversal attacks
+            # Validate plugin_path for path traversal and absolute path attacks
             if request.plugin_path:
                 safe_path = Path(request.plugin_path)
+                if safe_path.is_absolute():
+                    raise PluginFetchError(
+                        "plugin_path must be a relative path, not absolute"
+                    )
                 if ".." in safe_path.parts:
                     raise PluginFetchError(
                         "plugin_path cannot contain parent directory references"
@@ -258,7 +266,12 @@ class ConversationService:
             # Re-raise fetch errors as-is
             raise
         except Exception as e:
-            # Wrap other errors in PluginFetchError with exception type for debugging
+            # Log full stack trace at debug level for troubleshooting
+            logger.debug(
+                f"Plugin loading failed with unexpected error:\n"
+                f"{traceback.format_exc()}"
+            )
+            # Wrap in PluginFetchError with exception type for debugging
             raise PluginFetchError(
                 f"Failed to load plugin from {request.plugin_source}: "
                 f"{type(e).__name__}: {e}"
@@ -300,49 +313,13 @@ class ConversationService:
         base_config: HookConfig | None,
         plugin_config: HookConfig | None,
     ) -> HookConfig | None:
-        """Merge plugin hooks into base hook configuration.
+        """Merge plugin hooks into base hook configuration using additive semantics.
 
-        Design Decisions:
-        -----------------
-        This method implements ADDITIVE (concatenation) semantics for hooks,
-        following Claude Code's documented behavior where "plugin hooks run
-        alongside your custom hooks" and "multiple hooks from different sources
-        can respond to the same event."
+        Unlike skill merging (replacement), hooks are concatenated so multiple handlers
+        can respond to the same event. Base hooks run first, then plugin hooks.
 
-        This differs from skill merging (which uses replacement semantics)
-        because:
-        - Skills provide LLM context/instructions - duplicates would be confusing
-        - Hooks are event handlers - multiple handlers is a standard pattern
-          (e.g., one hook for logging, another for validation)
-
-        Merge Behavior:
-        ---------------
-        For each event type (PreToolUse, PostToolUse, etc.), the matcher lists
-        are concatenated: base matchers first, then plugin matchers appended.
-
-        Example:
-            base_config has PreToolUse: [matcher_A, matcher_B]
-            plugin_config has PreToolUse: [matcher_C]
-            result has PreToolUse: [matcher_A, matcher_B, matcher_C]
-
-        Execution Order Note (OpenHands vs Claude Code):
-        ------------------------------------------------
-        **IMPORTANT**: OpenHands SDK executes hooks SEQUENTIALLY with early-exit
-        semantics, while Claude Code executes hooks IN PARALLEL.
-
-        In OpenHands:
-        - Hooks execute in order (base hooks first, then plugin hooks)
-        - For PreToolUse: if a base hook blocks (exit code 2), plugin hooks
-          do NOT run (stop_on_block=True behavior)
-        - For PostToolUse: all hooks run regardless of individual results
-
-        In Claude Code:
-        - All matching hooks execute simultaneously in parallel
-        - No execution order guarantees
-        - Blocking decisions are aggregated after all hooks complete
-
-        This means append order matters more in OpenHands - base hooks get
-        "first say" on blocking decisions for PreToolUse events.
+        Note: OpenHands executes hooks sequentially with early-exit on block, so base
+        hooks get "first say" on PreToolUse blocking decisions.
 
         Args:
             base_config: Existing hook configuration from the request (may be None)
@@ -388,46 +365,43 @@ class ConversationService:
         Raises:
             PluginFetchError: If the plugin exceeds resource limits
         """
-        agent = request.agent
-        agent_updates: dict = {}
-        request_updates: dict = {}
+        if not plugin.skills and not plugin.mcp_config and not plugin.hooks:
+            return request
 
-        # Merge skills into agent context
-        if plugin.skills:
-            if len(plugin.skills) > self.MAX_PLUGIN_SKILLS:
-                raise PluginFetchError(
-                    f"Plugin has too many skills "
-                    f"({len(plugin.skills)} > {self.MAX_PLUGIN_SKILLS})"
-                )
-            agent_updates["agent_context"] = self._merge_skills(
-                agent.agent_context, plugin.skills
+        # Validate skill count limit
+        if plugin.skills and len(plugin.skills) > MAX_PLUGIN_SKILLS:
+            raise PluginFetchError(
+                f"Plugin has too many skills "
+                f"({len(plugin.skills)} > {MAX_PLUGIN_SKILLS})"
             )
 
-        # Merge MCP config into agent
-        if plugin.mcp_config:
-            existing_mcp = agent.mcp_config or {}
-            agent_updates["mcp_config"] = {**existing_mcp, **plugin.mcp_config}
+        # Build updated agent with merged skills and MCP config
+        agent = request.agent
+        new_agent_context = (
+            self._merge_skills(agent.agent_context, plugin.skills)
+            if plugin.skills
+            else agent.agent_context
+        )
+        new_mcp_config = (
+            {**(agent.mcp_config or {}), **plugin.mcp_config}
+            if plugin.mcp_config
+            else agent.mcp_config
+        )
+        updated_agent = agent.model_copy(
+            update={"agent_context": new_agent_context, "mcp_config": new_mcp_config}
+        )
 
-        # Merge hooks into request's hook_config
-        # See _merge_hook_configs docstring for detailed design rationale
+        # Merge hooks and log
+        new_hook_config = self._merge_hook_configs(request.hook_config, plugin.hooks)
         if plugin.hooks:
-            merged_hooks = self._merge_hook_configs(request.hook_config, plugin.hooks)
-            if merged_hooks:
-                request_updates["hook_config"] = merged_hooks
-                logger.info(
-                    f"Merged hooks from plugin '{plugin.name}': "
-                    f"{list(plugin.hooks.hooks.keys())} event types"
-                )
+            logger.info(
+                f"Merged hooks from plugin '{plugin.name}': "
+                f"{list(plugin.hooks.hooks.keys())} event types"
+            )
 
-        # Build the updated request
-        if agent_updates:
-            updated_agent = agent.model_copy(update=agent_updates)
-            request_updates["agent"] = updated_agent
-
-        if request_updates:
-            return request.model_copy(update=request_updates)
-
-        return request
+        return request.model_copy(
+            update={"agent": updated_agent, "hook_config": new_hook_config}
+        )
 
     # Write Methods
 
