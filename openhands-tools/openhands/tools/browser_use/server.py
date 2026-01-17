@@ -71,6 +71,10 @@ RRWEB_LOADER_SCRIPT = """
 RRWEB_START_MAX_RETRIES = 10
 RRWEB_START_RETRY_DELAY_MS = 500
 
+# Recording flush configuration
+RECORDING_FLUSH_INTERVAL_SECONDS = 5  # Flush every 5 seconds
+RECORDING_FLUSH_SIZE_MB = 1  # Flush when events exceed 1 MB
+
 
 class CustomBrowserUseServer(LogSafeBrowserUseServer):
     """
@@ -86,6 +90,12 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
     # Recording state stored on Python side to persist across page navigations
     _recording_events: list[dict] = []
     _is_recording: bool = False
+    
+    # Recording flush state
+    _recording_save_dir: str | None = None
+    _recording_file_counter: int = 0
+    _recording_flush_task: "asyncio.Task | None" = None
+    _recording_total_events: int = 0  # Total events across all files
 
     def set_inject_scripts(self, scripts: list[str]) -> None:
         """Set scripts to be injected into every new document.
@@ -128,10 +138,50 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
         except Exception as e:
             logger.warning(f"Failed to inject scripts: {e}")
 
+    def _save_events_to_file(self, events: list[dict]) -> str | None:
+        """Save events to a numbered JSON file.
+        
+        Args:
+            events: List of rrweb events to save.
+            
+        Returns:
+            Path to the saved file, or None if save_dir is not configured.
+        """
+        import json
+        import os
+
+        if not self._recording_save_dir or not events:
+            return None
+
+        os.makedirs(self._recording_save_dir, exist_ok=True)
+        self._recording_file_counter += 1
+        filename = f"{self._recording_file_counter}.json"
+        filepath = os.path.join(self._recording_save_dir, filename)
+
+        with open(filepath, "w") as f:
+            json.dump(events, f)
+
+        self._recording_total_events += len(events)
+        logger.debug(
+            f"Saved {len(events)} events to {filename} "
+            f"(total: {self._recording_total_events} events in "
+            f"{self._recording_file_counter} files)"
+        )
+        return filepath
+
+    def _get_events_size_bytes(self) -> int:
+        """Estimate the size of current events in bytes."""
+        import json
+        if not self._recording_events:
+            return 0
+        # Quick estimation using JSON serialization
+        return len(json.dumps(self._recording_events))
+
     async def _flush_recording_events(self) -> int:
         """Flush recording events from browser to Python storage.
 
-        This should be called before navigation to preserve events across pages.
+        This collects events from the browser and adds them to Python-side storage.
+        If events exceed the size threshold, they are saved to disk.
         Returns the number of events flushed.
         """
         if not self.browser_session or not self._is_recording:
@@ -159,10 +209,37 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             if events:
                 self._recording_events.extend(events)
                 logger.debug(f"Flushed {len(events)} recording events from browser")
+                
+                # Check if we should save to disk (size threshold)
+                size_bytes = self._get_events_size_bytes()
+                if size_bytes > RECORDING_FLUSH_SIZE_MB * 1024 * 1024:
+                    self._save_events_to_file(self._recording_events)
+                    self._recording_events = []
+                    
             return len(events)
         except Exception as e:
             logger.warning(f"Failed to flush recording events: {e}")
             return 0
+
+    async def _periodic_flush_task(self) -> None:
+        """Background task that periodically flushes recording events."""
+        import asyncio
+
+        while self._is_recording:
+            await asyncio.sleep(RECORDING_FLUSH_INTERVAL_SECONDS)
+            if not self._is_recording:
+                break
+                
+            try:
+                # Flush events from browser to Python storage
+                await self._flush_recording_events()
+                
+                # Save to disk if we have any events (periodic save)
+                if self._recording_events:
+                    self._save_events_to_file(self._recording_events)
+                    self._recording_events = []
+            except Exception as e:
+                logger.warning(f"Periodic flush failed: {e}")
 
     async def _set_recording_flag(self, should_record: bool) -> None:
         """Set the recording flag in the browser for auto-start on new pages."""
@@ -241,14 +318,18 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
         except Exception as e:
             logger.warning(f"Failed to restart recording on new page: {e}")
 
-    async def _start_recording(self) -> str:
+    async def _start_recording(self, save_dir: str | None = None) -> str:
         """Start rrweb session recording with automatic retry.
 
         Will retry up to RRWEB_START_MAX_RETRIES times if rrweb is not loaded yet.
         This handles the case where recording is started before the page fully loads.
 
-        Recording persists across page navigations - events are stored on the Python
-        side and automatically collected when stop_recording is called.
+        Recording persists across page navigations - events are periodically flushed
+        to numbered JSON files (1.json, 2.json, etc.) in the save_dir.
+        
+        Args:
+            save_dir: Directory to save recording files. If provided, events will be
+                periodically saved to numbered JSON files in this directory.
         """
         import asyncio
 
@@ -258,6 +339,9 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
         # Reset Python-side storage for new recording session
         self._recording_events = []
         self._is_recording = True
+        self._recording_save_dir = save_dir
+        self._recording_file_counter = 0
+        self._recording_total_events = 0
 
         try:
             cdp_session = await self.browser_session.get_or_create_cdp_session()
@@ -296,6 +380,10 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
                 status = value.get("status") if isinstance(value, dict) else value
 
                 if status == "started":
+                    # Start periodic flush task
+                    self._recording_flush_task = asyncio.create_task(
+                        self._periodic_flush_task()
+                    )
                     logger.info("Recording started successfully with rrweb")
                     return "Recording started"
 
@@ -339,18 +427,18 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             return f"Error starting recording: {str(e)}"
 
     async def _stop_recording(self, save_dir: str | None = None) -> str:
-        """Stop rrweb recording and save events to a file.
+        """Stop rrweb recording and save remaining events.
 
-        Args:
-            save_dir: Directory to save the recording file. If provided, events
-                are saved to a timestamped JSON file in this directory.
+        Stops the periodic flush task, collects any remaining events from the
+        browser, and saves them to a final numbered JSON file.
+        
+        Note: The save_dir parameter is ignored - the directory configured at
+        start_recording time is used. This parameter is kept for API compatibility.
 
         Returns:
-            A summary message (not the full events - those are saved to file).
+            A summary message with the save directory and file count.
         """
         import json
-        import os
-        from datetime import datetime
 
         if not self.browser_session:
             return "Error: No browser session active"
@@ -359,9 +447,19 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             return "Error: Not recording. Call browser_start_recording first."
 
         try:
+            # Stop the periodic flush task first
+            self._is_recording = False
+            if self._recording_flush_task:
+                self._recording_flush_task.cancel()
+                try:
+                    await self._recording_flush_task
+                except Exception:
+                    pass  # Task was cancelled, this is expected
+                self._recording_flush_task = None
+
             cdp_session = await self.browser_session.get_or_create_cdp_session()
 
-            # Stop recording on current page and get its events
+            # Stop recording on current page and get remaining events
             result = await cdp_session.cdp_client.send.Runtime.evaluate(
                 params={
                     "expression": """
@@ -389,69 +487,44 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             current_page_data = json.loads(result.get("result", {}).get("value", "{}"))
             current_page_events = current_page_data.get("events", [])
 
-            # Combine events from Python storage with current page
-            all_events = self._recording_events + current_page_events
+            # Add current page events to in-memory storage
+            if current_page_events:
+                self._recording_events.extend(current_page_events)
 
-            # Count event types for summary
-            event_types = {}
-            type_names = {
-                0: 'DomContentLoaded',
-                1: 'Load',
-                2: 'FullSnapshot',
-                3: 'IncrementalSnapshot',
-                4: 'Meta',
-                5: 'Custom',
-                6: 'Plugin'
-            }
-            for e in all_events:
-                type_num = e.get("type", -1)
-                type_name = type_names.get(type_num, f'Unknown_{type_num}')
-                event_types[type_name] = event_types.get(type_name, 0) + 1
+            # Save any remaining events to a final file
+            if self._recording_events:
+                self._save_events_to_file(self._recording_events)
 
-            # Count pages (each FullSnapshot typically represents a new page)
-            pages_recorded = event_types.get('FullSnapshot', 0)
-
-            # Reset state
-            self._is_recording = False
             await self._set_recording_flag(False)
 
-            # Save recording to file if save_dir is provided
-            saved_path = None
-            if save_dir and all_events:
-                os.makedirs(save_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"browser_recording_{timestamp}.json"
-                saved_path = os.path.join(save_dir, filename)
-
-                recording_data = {
-                    "events": all_events,
-                    "metadata": {
-                        "count": len(all_events),
-                        "pages_recorded": pages_recorded,
-                        "event_types": event_types,
-                        "timestamp": timestamp,
-                    }
-                }
-
-                with open(saved_path, "w") as f:
-                    json.dump(recording_data, f)
-
-                logger.info(f"Recording saved to: {saved_path}")
+            # Calculate totals
+            total_events = self._recording_total_events
+            total_files = self._recording_file_counter
+            save_dir_used = self._recording_save_dir
 
             # Clear Python-side storage
             self._recording_events = []
+            self._recording_save_dir = None
+            self._recording_file_counter = 0
+            self._recording_total_events = 0
 
-            logger.info(f"Recording stopped: {len(all_events)} events from {pages_recorded} page(s)")
+            logger.info(
+                f"Recording stopped: {total_events} events saved to "
+                f"{total_files} file(s) in {save_dir_used}"
+            )
 
-            # Return a concise summary message (not the full events)
-            summary = f"Recording stopped. Captured {len(all_events)} events from {pages_recorded} page(s)."
-            if saved_path:
-                summary += f" Saved to: {saved_path}"
+            # Return a concise summary message
+            summary = f"Recording stopped. Captured {total_events} events in {total_files} file(s)."
+            if save_dir_used:
+                summary += f" Saved to: {save_dir_used}"
 
             return summary
 
         except Exception as e:
             self._is_recording = False
+            if self._recording_flush_task:
+                self._recording_flush_task.cancel()
+                self._recording_flush_task = None
             logger.exception("Error stopping recording", exc_info=e)
             return f"Error stopping recording: {str(e)}"
 
