@@ -6,15 +6,32 @@ from openhands.tools.browser_use.logging_fix import LogSafeBrowserUseServer
 
 logger = get_logger(__name__)
 
-# rrweb loader script - injected into every page to make rrweb available
-# This script loads rrweb from CDN dynamically
+# =============================================================================
+# Configuration Constants
+# =============================================================================
+
+# Maximum retries for starting recording
+RRWEB_START_MAX_RETRIES = 10
+RRWEB_START_RETRY_DELAY_MS = 500
+
+# Recording flush configuration
+RECORDING_FLUSH_INTERVAL_SECONDS = 5  # Flush every 5 seconds
+RECORDING_FLUSH_SIZE_MB = 1  # Flush when events exceed 1 MB
+
+# rrweb CDN URL
 # NOTE: Using unpkg instead of jsdelivr because:
 # - jsdelivr returns Content-Type: application/node for .cjs files (browser won't execute)
 # - jsdelivr's .min.js is ES module format (no global window.rrweb)
 # - unpkg returns Content-Type: text/javascript for .cjs files (browser executes it)
 RRWEB_CDN_URL = "https://unpkg.com/rrweb@2.0.0-alpha.17/dist/rrweb.umd.cjs"
 
-RRWEB_LOADER_SCRIPT = """
+# =============================================================================
+# Injected JavaScript Code
+# =============================================================================
+
+# rrweb loader script - injected into every page to make rrweb available
+# This script loads rrweb from CDN dynamically and sets up auto-recording
+RRWEB_LOADER_JS = """
 (function() {
     if (window.__rrweb_loaded) return;
     window.__rrweb_loaded = true;
@@ -67,13 +84,79 @@ RRWEB_LOADER_SCRIPT = """
 })();
 """
 
-# Maximum retries for starting recording
-RRWEB_START_MAX_RETRIES = 10
-RRWEB_START_RETRY_DELAY_MS = 500
+# JavaScript to flush recording events from browser to Python
+FLUSH_EVENTS_JS = """
+(function() {
+    var events = window.__rrweb_events || [];
+    // Clear browser-side events after flushing
+    window.__rrweb_events = [];
+    return JSON.stringify({events: events});
+})();
+"""
 
-# Recording flush configuration
-RECORDING_FLUSH_INTERVAL_SECONDS = 5  # Flush every 5 seconds
-RECORDING_FLUSH_SIZE_MB = 1  # Flush when events exceed 1 MB
+# JavaScript to start recording on a page (used for restart after navigation)
+# Returns: {status: 'started'|'not_loaded'|'already_recording'}
+START_RECORDING_SIMPLE_JS = """
+(function() {
+    var recordFn = (typeof rrweb !== 'undefined' && rrweb.record) ||
+                   (typeof rrwebRecord !== 'undefined' && rrwebRecord.record);
+    if (!recordFn) return {status: 'not_loaded'};
+    if (window.__rrweb_stopFn) return {status: 'already_recording'};
+
+    window.__rrweb_events = [];
+    window.__rrweb_stopFn = recordFn({
+        emit: function(event) {
+            window.__rrweb_events.push(event);
+        }
+    });
+    return {status: 'started'};
+})();
+"""
+
+# JavaScript to start recording (full version with load failure check)
+# Returns: {status: 'started'|'not_loaded'|'already_recording'|'load_failed'}
+START_RECORDING_JS = """
+(function() {
+    if (window.__rrweb_stopFn) return {status: 'already_recording'};
+    // Check if rrweb failed to load from CDN
+    if (window.__rrweb_load_failed) return {status: 'load_failed'};
+    // rrweb UMD module exports to window.rrweb (not rrwebRecord)
+    var recordFn = (typeof rrweb !== 'undefined' && rrweb.record) ||
+                   (typeof rrwebRecord !== 'undefined' && rrwebRecord.record);
+    if (!recordFn) return {status: 'not_loaded'};
+    window.__rrweb_events = [];
+    window.__rrweb_should_record = true;
+    window.__rrweb_stopFn = recordFn({
+        emit: function(event) {
+            window.__rrweb_events.push(event);
+        }
+    });
+    return {status: 'started'};
+})();
+"""
+
+# JavaScript to stop recording and collect remaining events
+STOP_RECORDING_JS = """
+(function() {
+    var events = window.__rrweb_events || [];
+
+    // Stop the recording if active
+    if (window.__rrweb_stopFn) {
+        window.__rrweb_stopFn();
+        window.__rrweb_stopFn = null;
+    }
+
+    // Clear flags
+    window.__rrweb_should_record = false;
+    window.__rrweb_events = [];
+
+    return JSON.stringify({events: events});
+})();
+"""
+
+# =============================================================================
+# CustomBrowserUseServer Class
+# =============================================================================
 
 
 class CustomBrowserUseServer(LogSafeBrowserUseServer):
@@ -117,7 +200,7 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             return
 
         # Always include rrweb loader, plus any user-configured scripts
-        scripts_to_inject = [RRWEB_LOADER_SCRIPT] + self._inject_scripts
+        scripts_to_inject = [RRWEB_LOADER_JS] + self._inject_scripts
 
         try:
             cdp_session = await self.browser_session.get_or_create_cdp_session()
@@ -190,17 +273,7 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
         try:
             cdp_session = await self.browser_session.get_or_create_cdp_session()
             result = await cdp_session.cdp_client.send.Runtime.evaluate(
-                params={
-                    "expression": """
-                        (function() {
-                            var events = window.__rrweb_events || [];
-                            // Clear browser-side events after flushing
-                            window.__rrweb_events = [];
-                            return JSON.stringify({events: events});
-                        })();
-                    """,
-                    "returnByValue": True,
-                },
+                params={"expression": FLUSH_EVENTS_JS, "returnByValue": True},
                 session_id=cdp_session.session_id,
             )
             import json
@@ -272,28 +345,13 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
         try:
             cdp_session = await self.browser_session.get_or_create_cdp_session()
 
-            # Wait for rrweb to be ready and start recording
-            start_recording_js = """
-                (function() {
-                    var recordFn = (typeof rrweb !== 'undefined' && rrweb.record) ||
-                                   (typeof rrwebRecord !== 'undefined' && rrwebRecord.record);
-                    if (!recordFn) return {status: 'not_loaded'};
-                    if (window.__rrweb_stopFn) return {status: 'already_recording'};
-
-                    window.__rrweb_events = [];
-                    window.__rrweb_stopFn = recordFn({
-                        emit: function(event) {
-                            window.__rrweb_events.push(event);
-                        }
-                    });
-                    return {status: 'started'};
-                })();
-            """
-
             # Retry a few times waiting for rrweb to load on new page
             for attempt in range(RRWEB_START_MAX_RETRIES):
                 result = await cdp_session.cdp_client.send.Runtime.evaluate(
-                    params={"expression": start_recording_js, "returnByValue": True},
+                    params={
+                        "expression": START_RECORDING_SIMPLE_JS,
+                        "returnByValue": True,
+                    },
                     session_id=cdp_session.session_id,
                 )
 
@@ -349,30 +407,10 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
             # Set flag so new pages auto-start recording
             await self._set_recording_flag(True)
 
-            start_recording_js = """
-                (function() {
-                    if (window.__rrweb_stopFn) return {status: 'already_recording'};
-                    // Check if rrweb failed to load from CDN
-                    if (window.__rrweb_load_failed) return {status: 'load_failed'};
-                    // rrweb UMD module exports to window.rrweb (not rrwebRecord)
-                    var recordFn = (typeof rrweb !== 'undefined' && rrweb.record) ||
-                                   (typeof rrwebRecord !== 'undefined' && rrwebRecord.record);
-                    if (!recordFn) return {status: 'not_loaded'};
-                    window.__rrweb_events = [];
-                    window.__rrweb_should_record = true;
-                    window.__rrweb_stopFn = recordFn({
-                        emit: function(event) {
-                            window.__rrweb_events.push(event);
-                        }
-                    });
-                    return {status: 'started'};
-                })();
-            """
-
             # Retry loop for starting recording
             for attempt in range(RRWEB_START_MAX_RETRIES):
                 result = await cdp_session.cdp_client.send.Runtime.evaluate(
-                    params={"expression": start_recording_js, "returnByValue": True},
+                    params={"expression": START_RECORDING_JS, "returnByValue": True},
                     session_id=cdp_session.session_id,
                 )
 
@@ -461,26 +499,7 @@ class CustomBrowserUseServer(LogSafeBrowserUseServer):
 
             # Stop recording on current page and get remaining events
             result = await cdp_session.cdp_client.send.Runtime.evaluate(
-                params={
-                    "expression": """
-                        (function() {
-                            var events = window.__rrweb_events || [];
-
-                            // Stop the recording if active
-                            if (window.__rrweb_stopFn) {
-                                window.__rrweb_stopFn();
-                                window.__rrweb_stopFn = null;
-                            }
-
-                            // Clear flags
-                            window.__rrweb_should_record = false;
-                            window.__rrweb_events = [];
-
-                            return JSON.stringify({events: events});
-                        })();
-                    """,
-                    "returnByValue": True,
-                },
+                params={"expression": STOP_RECORDING_JS, "returnByValue": True},
                 session_id=cdp_session.session_id,
             )
 
