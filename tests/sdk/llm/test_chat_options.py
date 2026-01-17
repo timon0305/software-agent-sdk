@@ -20,7 +20,7 @@ class DummyLLM:
     prompt_cache_retention: str | None = "24h"
 
 
-def test_opus_4_5_uses_effort_and_beta_header_and_strips_temp_top_p():
+def test_opus_4_5_uses_reasoning_effort_and_strips_temp_top_p():
     llm = DummyLLM(
         model="claude-opus-4-5-20251101",
         top_p=0.9,
@@ -29,13 +29,14 @@ def test_opus_4_5_uses_effort_and_beta_header_and_strips_temp_top_p():
     )
     out = select_chat_options(llm, user_kwargs={}, has_tools=True)
 
-    # Uses output_config.effort instead of reasoning_effort
-    assert out.get("output_config") == {"effort": "medium"}
-    assert "reasoning_effort" not in out
+    # LiteLLM automatically maps reasoning_effort to output_config
+    assert out.get("reasoning_effort") == "medium"
+    assert "output_config" not in out
 
-    # Adds the required beta header for effort
-    headers = out.get("extra_headers") or {}
-    assert headers.get("anthropic-beta") == "effort-2025-11-24"
+    # LiteLLM automatically adds the required beta header
+    assert "extra_headers" not in out or "anthropic-beta" not in out.get(
+        "extra_headers", {}
+    )
 
     # Strips temperature/top_p for reasoning models
     assert "temperature" not in out
@@ -97,3 +98,51 @@ def test_extra_body_is_forwarded():
     out = select_chat_options(llm, user_kwargs={}, has_tools=True)
 
     assert out.get("extra_body") == {"x": 1}
+
+
+def test_extended_thinking_budget_clamped_below_max_tokens():
+    """Test that thinking.budget_tokens is clamped to max_output_tokens - 1."""
+    # Case 1: extended_thinking_budget exceeds max_output_tokens
+    llm = DummyLLM(
+        model="claude-sonnet-4-5-20250929",
+        max_output_tokens=1000,
+        extended_thinking_budget=2000,
+    )
+    out = select_chat_options(llm, user_kwargs={}, has_tools=True)
+
+    # budget_tokens should be clamped to max_output_tokens - 1 = 999
+    assert out.get("thinking") == {
+        "type": "enabled",
+        "budget_tokens": 999,
+    }
+    assert out.get("max_tokens") == 1000
+
+    # Case 2: extended_thinking_budget equals max_output_tokens
+    llm = DummyLLM(
+        model="claude-sonnet-4-5-20250929",
+        max_output_tokens=1000,
+        extended_thinking_budget=1000,
+    )
+    out = select_chat_options(llm, user_kwargs={}, has_tools=True)
+
+    # budget_tokens should be clamped to max_output_tokens - 1 = 999
+    assert out.get("thinking") == {
+        "type": "enabled",
+        "budget_tokens": 999,
+    }
+    assert out.get("max_tokens") == 1000
+
+    # Case 3: extended_thinking_budget is already below max_output_tokens
+    llm = DummyLLM(
+        model="claude-sonnet-4-5-20250929",
+        max_output_tokens=1000,
+        extended_thinking_budget=500,
+    )
+    out = select_chat_options(llm, user_kwargs={}, has_tools=True)
+
+    # budget_tokens should remain as-is
+    assert out.get("thinking") == {
+        "type": "enabled",
+        "budget_tokens": 500,
+    }
+    assert out.get("max_tokens") == 1000
