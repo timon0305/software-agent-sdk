@@ -78,7 +78,6 @@ class MCPClient(AsyncMCPClient):
         """
         if self._closed:
             return
-        self._closed = True
 
         # Best-effort: try async close if parent provides it
         if hasattr(self, "close") and inspect.iscoroutinefunction(self.close):
@@ -89,6 +88,10 @@ class MCPClient(AsyncMCPClient):
 
         # Always cleanup the executor
         self._executor.close()
+
+        # Mark closed only after cleanup succeeds
+        # (Both close methods are idempotent, so retries are safe)
+        self._closed = True
 
     def __del__(self):
         """Cleanup on deletion."""
