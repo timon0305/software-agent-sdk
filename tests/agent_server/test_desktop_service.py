@@ -438,7 +438,7 @@ class TestDesktopService:
             url = service.get_vnc_url("http://example.com:8000")
             expected = (
                 "http://example.com:8000/vnc.html?"
-                f"path=websockify&token={token}&"
+                f"path=websockify?token={token}&"
                 "autoconnect=1&resize=remote"
             )
             assert url == expected
@@ -468,7 +468,7 @@ class TestDesktopService:
             url = service.get_vnc_url()
             expected = (
                 "http://localhost:8003/vnc.html?"
-                f"path=websockify&token={token}&"
+                f"path=websockify?token={token}&"
                 "autoconnect=1&resize=remote"
             )
             assert url == expected
