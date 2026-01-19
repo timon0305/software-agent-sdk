@@ -96,8 +96,10 @@ def create_mcp_tools(
         # Clean up on any error (don't mask the original exception)
         try:
             client.sync_close()
-        except Exception:
-            pass
+        except Exception as close_exc:
+            logger.warning(
+                "Failed to close MCP client during error cleanup", exc_info=close_exc
+            )
         raise
 
     logger.info(f"Created {len(tools)} MCP tools: {[t.name for t in tools]}")

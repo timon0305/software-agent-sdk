@@ -16,6 +16,7 @@ With the FIX, we call `__aenter__` once and keep the connection open.
 Related: https://github.com/OpenHands/software-agent-sdk/issues/1739
 """
 
+import logging
 import socket
 import threading
 import time
@@ -115,7 +116,7 @@ class SessionStatefulMCPServer:
                     )
                 )
             except Exception:
-                pass
+                logging.exception("Error in SessionStatefulMCPServer thread")
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()
