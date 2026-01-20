@@ -30,7 +30,7 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.hooks import HookConfig, HookDefinition, HookMatcher
+from openhands.sdk.hooks import HookConfig, HookDefinition, HookMatcher, HookType
 from openhands.sdk.plugin import PluginSource
 from openhands.sdk.workspace import LocalWorkspace
 
@@ -341,7 +341,9 @@ async def test_start_conversation_with_explicit_hook_config(conversation_service
             pre_tool_use=[
                 HookMatcher(
                     matcher="*",
-                    hooks=[HookDefinition(type="command", command="echo explicit")],
+                    hooks=[
+                        HookDefinition(type=HookType.COMMAND, command="echo explicit")
+                    ],
                 )
             ]
         )
@@ -410,7 +412,9 @@ async def test_start_conversation_merges_explicit_and_plugin_hooks(
             pre_tool_use=[
                 HookMatcher(
                     matcher="*",
-                    hooks=[HookDefinition(type="command", command="echo explicit")],
+                    hooks=[
+                        HookDefinition(type=HookType.COMMAND, command="echo explicit")
+                    ],
                 )
             ]
         )

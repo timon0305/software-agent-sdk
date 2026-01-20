@@ -553,7 +553,9 @@ class TestRepoPathParameter:
         subplugin_dir = plugin_dir / "plugins" / "my-plugin"
         subplugin_dir.mkdir(parents=True)
 
-        with pytest.raises(PluginFetchError, match="repo_path is not supported for local"):
+        with pytest.raises(
+            PluginFetchError, match="repo_path is not supported for local"
+        ):
             fetch_plugin(str(plugin_dir), repo_path="plugins/my-plugin")
 
     def test_fetch_local_path_without_repo_path(self, tmp_path: Path):
@@ -636,7 +638,9 @@ class TestRepoPathParameter:
         plugin_dir = tmp_path / "monorepo"
         plugin_dir.mkdir()
 
-        with pytest.raises(PluginFetchError, match="repo_path is not supported for local"):
+        with pytest.raises(
+            PluginFetchError, match="repo_path is not supported for local"
+        ):
             Plugin.fetch(str(plugin_dir), repo_path="plugins/my-plugin")
 
     def test_fetch_no_repo_path_returns_root(self, tmp_path: Path):
