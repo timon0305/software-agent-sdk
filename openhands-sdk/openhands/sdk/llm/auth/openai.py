@@ -10,6 +10,8 @@ Uses authlib for OAuth handling and aiohttp for the callback server.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import platform
 import time
 import webbrowser
@@ -53,6 +55,51 @@ def _generate_pkce() -> tuple[str, str]:
     verifier = generate_token(43)
     challenge = create_s256_code_challenge(verifier)
     return verifier, challenge
+
+
+def _extract_chatgpt_account_id(access_token: str) -> str | None:
+    """Extract chatgpt_account_id from JWT access token.
+
+    Decodes the JWT payload without verification (since we trust the token
+    came from OpenAI's auth server) and extracts the account ID needed
+    for API requests.
+
+    Args:
+        access_token: The JWT access token from OAuth flow
+
+    Returns:
+        The chatgpt_account_id if found, None otherwise
+    """
+    try:
+        # JWT format: header.payload.signature
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            logger.warning("Invalid JWT format: expected 3 parts")
+            return None
+
+        # Decode payload (add padding if needed)
+        payload_b64 = parts[1]
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        payload = json.loads(payload_bytes)
+
+        # Extract account ID from nested structure
+        auth_info = payload.get("https://api.openai.com/auth", {})
+        account_id = auth_info.get("chatgpt_account_id")
+
+        if account_id:
+            logger.debug(f"Extracted chatgpt_account_id: {account_id}")
+            return account_id
+        else:
+            logger.warning("chatgpt_account_id not found in JWT payload")
+            return None
+
+    except Exception as e:
+        logger.warning(f"Failed to decode JWT: {e}")
+        return None
 
 
 def _build_authorize_url(redirect_uri: str, code_challenge: str, state: str) -> str:
@@ -390,6 +437,15 @@ class OpenAISubscriptionAuth:
         # Build cross-platform user agent string
         user_agent = f"openhands-sdk ({platform.system()}; {platform.machine()})"
 
+        # Extract chatgpt_account_id from JWT access token
+        # This is required for the API to recognize the subscription plan
+        account_id = _extract_chatgpt_account_id(creds.access_token)
+        if not account_id:
+            logger.warning(
+                "Could not extract chatgpt_account_id from access token. "
+                "API requests may fail."
+            )
+
         # Codex-specific extra_body parameters
         extra_body: dict[str, Any] = {
             "store": False,  # Don't persist conversations
@@ -408,17 +464,25 @@ class OpenAISubscriptionAuth:
         llm_kwargs_final = {
             "temperature": None,
             "max_output_tokens": None,
+            "stream": True,  # Codex API requires streaming
             **llm_kwargs,  # User overrides come last
         }
+
+        # Build headers matching OpenAI's official Codex CLI implementation
+        extra_headers: dict[str, str] = {
+            "originator": "codex_cli_rs",  # Match official Codex CLI
+            "OpenAI-Beta": "responses=experimental",  # Required for Responses API
+            "User-Agent": user_agent,
+        }
+        # Add chatgpt-account-id header if successfully extracted
+        if account_id:
+            extra_headers["chatgpt-account-id"] = account_id
 
         llm = LLM(
             model=f"openai/{model}",
             base_url=CODEX_API_ENDPOINT.rsplit("/", 1)[0],
             api_key=creds.access_token,
-            extra_headers={
-                "originator": "openhands",
-                "User-Agent": user_agent,
-            },
+            extra_headers=extra_headers,
             litellm_extra_body=extra_body,
             **llm_kwargs_final,
         )

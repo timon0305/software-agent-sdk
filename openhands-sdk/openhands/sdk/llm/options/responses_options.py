@@ -27,10 +27,6 @@ def select_responses_options(
         out["temperature"] = 1.0
     out["tool_choice"] = "auto"
 
-    # Subscription mode requires streaming to be enabled
-    if llm.is_subscription:
-        out["stream"] = True
-
     # If user didn't set extra_headers, propagate from llm config
     if llm.extra_headers is not None and "extra_headers" not in out:
         out["extra_headers"] = dict(llm.extra_headers)

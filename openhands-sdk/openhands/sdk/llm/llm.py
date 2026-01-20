@@ -695,7 +695,8 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
         """
         user_enable_streaming = bool(kwargs.get("stream", False)) or self.stream
         if user_enable_streaming:
-            if on_token is None:
+            if on_token is None and not self.is_subscription:
+                # We allow on_token to be None for subscription mode
                 raise ValueError("Streaming requires an on_token callback")
             kwargs["stream"] = True
 
