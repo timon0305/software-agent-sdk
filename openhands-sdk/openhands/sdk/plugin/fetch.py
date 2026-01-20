@@ -226,7 +226,8 @@ def fetch_plugin(
         if repo_path is not None:
             raise PluginFetchError(
                 f"repo_path is not supported for local plugin sources. "
-                f"Specify the full path directly instead of source='{source}' + repo_path='{repo_path}'"
+                f"Specify the full path directly instead of "
+                f"source='{source}' + repo_path='{repo_path}'"
             )
         return _resolve_local_source(url)
 
