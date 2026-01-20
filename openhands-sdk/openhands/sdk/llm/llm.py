@@ -49,8 +49,20 @@ from litellm.exceptions import (
     Timeout as LiteLLMTimeout,
 )
 from litellm.responses.main import responses as litellm_responses
-from litellm.types.llms.openai import ResponsesAPIResponse
-from litellm.types.utils import ModelResponse
+from litellm.responses.streaming_iterator import SyncResponsesAPIStreamingIterator
+from litellm.types.llms.openai import (
+    OutputTextDeltaEvent,
+    ReasoningSummaryTextDeltaEvent,
+    RefusalDeltaEvent,
+    ResponseCompletedEvent,
+    ResponsesAPIResponse,
+)
+from litellm.types.utils import (
+    Delta,
+    ModelResponse,
+    ModelResponseStream,
+    StreamingChoices,
+)
 from litellm.utils import (
     create_pretrained_tokenizer,
     supports_vision,
@@ -650,7 +662,7 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
             raise
 
     # =========================================================================
-    # Responses API (non-stream, v1)
+    # Responses API (v1)
     # =========================================================================
     def responses(
         self,
@@ -674,16 +686,18 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
             store: Whether to store the conversation
             _return_metrics: Whether to return usage metrics
             add_security_risk_prediction: Add security_risk field to tool schemas
-            on_token: Optional callback for streaming tokens (not yet supported)
+            on_token: Optional callback for streaming deltas
             **kwargs: Additional arguments passed to the API
 
         Note:
             Summary field is always added to tool schemas for transparency and
             explainability of agent actions.
         """
-        # Streaming not yet supported
-        if kwargs.get("stream", False) or self.stream or on_token is not None:
-            raise ValueError("Streaming is not supported for Responses API yet")
+        user_enable_streaming = bool(kwargs.get("stream", False)) or self.stream
+        if user_enable_streaming:
+            if on_token is None:
+                raise ValueError("Streaming requires an on_token callback")
+            kwargs["stream"] = True
 
         # Build instructions + input list using dedicated Responses formatter
         instructions, input_items = self.format_messages_for_responses(messages)
@@ -759,12 +773,67 @@ class LLM(BaseModel, RetryMixin, NonNativeToolCallingMixin):
                         seed=self.seed,
                         **final_kwargs,
                     )
-                    assert isinstance(ret, ResponsesAPIResponse), (
+                    if isinstance(ret, ResponsesAPIResponse):
+                        if user_enable_streaming:
+                            logger.warning(
+                                "Responses streaming was requested, but the provider "
+                                "returned a non-streaming response; no on_token deltas "
+                                "will be emitted."
+                            )
+                        self._telemetry.on_response(ret)
+                        return ret
+
+                    # When stream=True, LiteLLM returns a streaming iterator rather than
+                    # a single ResponsesAPIResponse. Drain the iterator and use the
+                    # completed response.
+                    if final_kwargs.get("stream", False):
+                        if not isinstance(ret, SyncResponsesAPIStreamingIterator):
+                            raise AssertionError(
+                                f"Expected Responses stream iterator, got {type(ret)}"
+                            )
+
+                        stream_callback = on_token if user_enable_streaming else None
+                        for event in ret:
+                            if stream_callback is None:
+                                continue
+                            if isinstance(
+                                event,
+                                (
+                                    OutputTextDeltaEvent,
+                                    RefusalDeltaEvent,
+                                    ReasoningSummaryTextDeltaEvent,
+                                ),
+                            ):
+                                delta = event.delta
+                                if delta:
+                                    stream_callback(
+                                        ModelResponseStream(
+                                            choices=[
+                                                StreamingChoices(
+                                                    delta=Delta(content=delta)
+                                                )
+                                            ]
+                                        )
+                                    )
+
+                        completed_event = ret.completed_response
+                        if completed_event is None:
+                            raise LLMNoResponseError(
+                                "Responses stream finished without a completed response"
+                            )
+                        if not isinstance(completed_event, ResponseCompletedEvent):
+                            raise LLMNoResponseError(
+                                f"Unexpected completed event: {type(completed_event)}"
+                            )
+
+                        completed_resp = completed_event.response
+
+                        self._telemetry.on_response(completed_resp)
+                        return completed_resp
+
+                    raise AssertionError(
                         f"Expected ResponsesAPIResponse, got {type(ret)}"
                     )
-                    # telemetry (latency, cost). Token usage mapping we handle after.
-                    self._telemetry.on_response(ret)
-                    return ret
 
         try:
             resp: ResponsesAPIResponse = _one_attempt()
