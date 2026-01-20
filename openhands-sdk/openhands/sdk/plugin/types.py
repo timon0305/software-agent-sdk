@@ -52,6 +52,20 @@ class PluginSource(BaseModel):
         ),
     )
 
+    @field_validator("repo_path")
+    @classmethod
+    def validate_repo_path(cls, v: str | None) -> str | None:
+        """Validate repo_path is a safe relative path within the repository."""
+        if v is None:
+            return v
+        # Must be relative (no absolute paths)
+        if v.startswith("/"):
+            raise ValueError("repo_path must be relative, not absolute")
+        # No parent directory traversal
+        if ".." in Path(v).parts:
+            raise ValueError("repo_path cannot contain '..' (parent directory traversal)")
+        return v
+
 
 # Type aliases for marketplace plugin entry configurations
 # These provide better documentation than dict[str, Any] while remaining flexible

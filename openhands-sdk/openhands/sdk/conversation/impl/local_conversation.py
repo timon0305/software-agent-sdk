@@ -127,19 +127,19 @@ class LocalConversation(BaseConversation):
         self._cleanup_initiated = False
 
         # Load plugins if specified (recommended pattern)
-        plugin_hook_config: HookConfig | None = None
+        final_agent = agent
+        final_hook_config = hook_config
         if plugins:
-            agent, plugin_hook_config = load_plugins(plugins, agent)
+            final_agent, plugin_hooks = load_plugins(plugins, agent)
             logger.info(f"Loaded {len(plugins)} plugin(s) via Conversation")
+            # Combine explicit hook_config with plugin hooks
+            if plugin_hooks and hook_config:
+                # Merge: explicit hooks first, then plugin hooks (concatenate)
+                final_hook_config = merge_hook_configs([hook_config, plugin_hooks])
+            elif plugin_hooks:
+                final_hook_config = plugin_hooks
 
-        # Combine explicit hook_config with plugin hooks
-        if plugin_hook_config and hook_config:
-            # Merge: explicit hooks first, then plugin hooks (concatenate)
-            hook_config = merge_hook_configs([hook_config, plugin_hook_config])
-        elif plugin_hook_config:
-            hook_config = plugin_hook_config
-
-        self.agent = agent
+        self.agent = final_agent
         if isinstance(workspace, (str, Path)):
             # LocalWorkspace accepts both str and Path via BeforeValidator
             workspace = LocalWorkspace(working_dir=workspace)
@@ -197,9 +197,9 @@ class LocalConversation(BaseConversation):
 
         # If hooks configured, wrap with hook processor that forwards to base chain
         self._hook_processor = None
-        if hook_config is not None:
+        if final_hook_config is not None:
             self._hook_processor, self._on_event = create_hook_callback(
-                hook_config=hook_config,
+                hook_config=final_hook_config,
                 working_dir=str(self.workspace.working_dir),
                 session_id=str(desired_id),
                 original_callback=base_callback,

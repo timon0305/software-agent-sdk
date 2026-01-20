@@ -247,8 +247,8 @@ class ConversationService:
             )
             logger.info(f"Loaded {len(request.plugins)} plugin(s) for conversation")
 
-        # Create stored conversation with updated agent and hook_config
-        # Exclude plugins from stored data since they've been loaded
+        # Create stored conversation with updated agent and hook_config.
+        # Plugins are ephemeral input (fetched/loaded above), not persistent state.
         stored = StoredConversation(
             id=conversation_id,
             hook_config=hook_config,

@@ -11,6 +11,7 @@ from openhands.sdk.context.skills import Skill
 def merge_skills(
     agent_context: AgentContext | None,
     plugin_skills: list[Skill],
+    max_skills: int | None = None,
 ) -> AgentContext:
     """Merge plugin skills into agent context.
 
@@ -19,15 +20,24 @@ def merge_skills(
     Args:
         agent_context: Existing agent context (or None)
         plugin_skills: Skills to merge in
+        max_skills: Optional max total skills (raises ValueError if exceeded)
 
     Returns:
         New AgentContext with merged skills
+
+    Raises:
+        ValueError: If max_skills limit would be exceeded
     """
     existing_skills = agent_context.skills if agent_context else []
 
     skills_by_name = {s.name: s for s in existing_skills}
     for skill in plugin_skills:
         skills_by_name[skill.name] = skill
+
+    if max_skills is not None and len(skills_by_name) > max_skills:
+        raise ValueError(
+            f"Plugin has too many skills ({len(skills_by_name)} > {max_skills})"
+        )
 
     merged_skills = list(skills_by_name.values())
 
@@ -42,8 +52,9 @@ def merge_mcp_configs(
 ) -> dict[str, Any]:
     """Merge MCP configurations.
 
-    Plugin config takes precedence for same keys at each level.
-    Specifically handles mcpServers to merge servers by name.
+    Merge semantics (Claude Code compatible):
+    - mcpServers: deep-merge by server name (last plugin wins for same server)
+    - Other top-level keys: shallow override (plugin wins)
 
     Args:
         base_config: Base MCP configuration
@@ -59,10 +70,10 @@ def merge_mcp_configs(
     if plugin_config is None:
         return dict(base_config)
 
-    # Deep copy to avoid mutating inputs
+    # Shallow copy to avoid mutating inputs
     result = dict(base_config)
 
-    # Merge mcpServers specifically (override by server name)
+    # Merge mcpServers by server name (Claude Code compatible behavior)
     if "mcpServers" in plugin_config:
         if "mcpServers" not in result:
             result["mcpServers"] = {}
@@ -71,7 +82,7 @@ def merge_mcp_configs(
             **plugin_config["mcpServers"],
         }
 
-    # Merge any other top-level keys (plugin wins)
+    # Other top-level keys: plugin wins (shallow override)
     for key, value in plugin_config.items():
         if key != "mcpServers":
             result[key] = value

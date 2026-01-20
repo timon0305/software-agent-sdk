@@ -119,22 +119,8 @@ class Plugin(BaseModel):
             ...     update={"agent_context": new_context, "mcp_config": new_mcp}
             ... )
         """
-        # Check skill limit if specified
-        if max_skills is not None and self.skills:
-            # Count unique skills after merge (since plugins can override)
-            skills_by_name = {}
-            if agent_context and agent_context.skills:
-                skills_by_name = {s.name: s for s in agent_context.skills}
-            for skill in self.skills:
-                skills_by_name[skill.name] = skill
-
-            if len(skills_by_name) > max_skills:
-                raise ValueError(
-                    f"Plugin has too many skills ({len(skills_by_name)} > {max_skills})"
-                )
-
-        # Merge skills
-        merged_context = merge_skills(agent_context, self.skills)
+        # Merge skills (with optional limit check)
+        merged_context = merge_skills(agent_context, self.skills, max_skills=max_skills)
 
         # Merge MCP config
         merged_mcp = merge_mcp_configs(mcp_config, self.mcp_config)

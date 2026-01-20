@@ -46,30 +46,23 @@ def merge_hook_configs(configs: list[HookConfig]) -> HookConfig | None:
     if not configs:
         return None
 
-    # Collect all matchers by event type
-    merged_pre_tool_use = []
-    merged_post_tool_use = []
-    merged_user_prompt_submit = []
-    merged_session_start = []
-    merged_session_end = []
-    merged_stop = []
-
-    for config in configs:
-        merged_pre_tool_use.extend(config.pre_tool_use)
-        merged_post_tool_use.extend(config.post_tool_use)
-        merged_user_prompt_submit.extend(config.user_prompt_submit)
-        merged_session_start.extend(config.session_start)
-        merged_session_end.extend(config.session_end)
-        merged_stop.extend(config.stop)
-
-    merged = HookConfig(
-        pre_tool_use=merged_pre_tool_use,
-        post_tool_use=merged_post_tool_use,
-        user_prompt_submit=merged_user_prompt_submit,
-        session_start=merged_session_start,
-        session_end=merged_session_end,
-        stop=merged_stop,
+    # All hook event type fields in HookConfig
+    hook_fields = (
+        "pre_tool_use",
+        "post_tool_use",
+        "user_prompt_submit",
+        "session_start",
+        "session_end",
+        "stop",
     )
+
+    # Collect all matchers by event type
+    merged: dict[str, list] = {field: [] for field in hook_fields}
+    for config in configs:
+        for field in hook_fields:
+            merged[field].extend(getattr(config, field))
+
+    merged = HookConfig(**merged)
 
     # Return None if the merged config is empty
     if merged.is_empty():
