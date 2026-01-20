@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -96,12 +97,14 @@ class CredentialStore:
         with open(creds_file, "w") as f:
             json.dump(credentials.model_dump(), f, indent=2)
         # Set restrictive permissions (owner read/write only)
-        # Set restrictive permissions (owner read/write only)
         # Note: On Windows, NTFS ACLs should be used instead
-        if os.name != 'nt':  # Not Windows
+        if os.name != "nt":  # Not Windows
             creds_file.chmod(0o600)
         else:
-            logger.warning("File permissions on Windows should be manually restricted")
+            warnings.warn(
+                "File permissions on Windows should be manually restricted",
+                stacklevel=2,
+            )
 
     def delete(self, vendor: str) -> bool:
         """Delete stored credentials for a vendor.

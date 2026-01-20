@@ -8,13 +8,19 @@ import pytest
 from openhands.sdk.llm.auth.credentials import CredentialStore, OAuthCredentials
 from openhands.sdk.llm.auth.openai import (
     CLIENT_ID,
+    CONSENT_BANNER,
+    CONSENT_DISCLAIMER,
     ISSUER,
     OPENAI_CODEX_MODELS,
     OpenAISubscriptionAuth,
     _build_authorize_url,
+    _display_consent_and_confirm,
     _extract_chatgpt_account_id,
     _generate_pkce,
+    _get_consent_marker_path,
+    _has_acknowledged_consent,
     _jwks_cache,
+    _mark_consent_acknowledged,
 )
 
 
@@ -413,3 +419,187 @@ class TestJWKSCache:
             _jwks_cache.get_key_set()
 
             assert mock_client.get.call_count == 2
+
+
+# =========================================================================
+# Tests for consent banner system
+# =========================================================================
+
+
+class TestConsentBannerSystem:
+    """Tests for the consent banner and acknowledgment system."""
+
+    def test_consent_banner_content(self):
+        """Test that consent banner contains required text."""
+        assert "ChatGPT" in CONSENT_BANNER
+        assert "Terms of Use" in CONSENT_BANNER
+        assert "openai.com/policies/terms-of-use" in CONSENT_BANNER
+
+    def test_consent_disclaimer_content(self):
+        """Test that consent disclaimer contains required text."""
+        assert "Data rights & privacy" in CONSENT_DISCLAIMER
+        assert "Prohibited data" in CONSENT_DISCLAIMER
+        assert "Protected Health Information" in CONSENT_DISCLAIMER
+        assert "children under 13" in CONSENT_DISCLAIMER
+
+    def test_consent_marker_path(self, tmp_path):
+        """Test that consent marker path is in credentials directory."""
+        with patch(
+            "openhands.sdk.llm.auth.openai.get_credentials_dir", return_value=tmp_path
+        ):
+            marker_path = _get_consent_marker_path()
+            assert marker_path.parent == tmp_path
+            assert ".chatgpt_consent_acknowledged" in str(marker_path)
+
+    def test_has_acknowledged_consent_false_initially(self, tmp_path):
+        """Test that consent is not acknowledged initially."""
+        with patch(
+            "openhands.sdk.llm.auth.openai.get_credentials_dir", return_value=tmp_path
+        ):
+            assert not _has_acknowledged_consent()
+
+    def test_mark_consent_acknowledged(self, tmp_path):
+        """Test marking consent as acknowledged."""
+        with patch(
+            "openhands.sdk.llm.auth.openai.get_credentials_dir", return_value=tmp_path
+        ):
+            assert not _has_acknowledged_consent()
+            _mark_consent_acknowledged()
+            assert _has_acknowledged_consent()
+
+    def test_display_consent_user_accepts(self, tmp_path, capsys):
+        """Test consent display when user accepts."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            result = _display_consent_and_confirm(verbose=False)
+            assert result is True
+
+            # Check banner was printed
+            captured = capsys.readouterr()
+            assert "ChatGPT" in captured.out
+            assert "Terms of Use" in captured.out
+
+    def test_display_consent_user_declines(self, tmp_path, capsys):
+        """Test consent display when user declines."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="n"),
+        ):
+            result = _display_consent_and_confirm(verbose=False)
+            assert result is False
+
+    def test_display_consent_first_time_shows_disclaimer(self, tmp_path, capsys):
+        """Test that first-time consent shows full disclaimer."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            _display_consent_and_confirm(verbose=False)
+            captured = capsys.readouterr()
+            # First time should show disclaimer
+            assert "Data rights & privacy" in captured.out
+
+    def test_display_consent_subsequent_time_no_disclaimer(self, tmp_path, capsys):
+        """Test that subsequent consent does not show full disclaimer."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            # First time - acknowledge
+            _display_consent_and_confirm(verbose=False)
+            capsys.readouterr()  # Clear output
+
+            # Second time - should not show disclaimer
+            _display_consent_and_confirm(verbose=False)
+            captured = capsys.readouterr()
+            # Banner should still be shown
+            assert "ChatGPT" in captured.out
+            # But not the full disclaimer
+            assert "Data rights & privacy" not in captured.out
+
+    def test_display_consent_verbose_always_shows_disclaimer(self, tmp_path, capsys):
+        """Test that verbose flag always shows full disclaimer."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            # First time - acknowledge
+            _display_consent_and_confirm(verbose=False)
+            capsys.readouterr()  # Clear output
+
+            # Second time with verbose - should show disclaimer
+            _display_consent_and_confirm(verbose=True)
+            captured = capsys.readouterr()
+            assert "Data rights & privacy" in captured.out
+
+    def test_display_consent_non_interactive_first_time_raises(self, tmp_path):
+        """Test that non-interactive mode raises error on first time."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=False),
+        ):
+            with pytest.raises(RuntimeError, match="non-interactive mode"):
+                _display_consent_and_confirm(verbose=False)
+
+    def test_display_consent_non_interactive_after_acknowledgment(self, tmp_path):
+        """Test that non-interactive mode works after prior acknowledgment."""
+        with patch(
+            "openhands.sdk.llm.auth.openai.get_credentials_dir", return_value=tmp_path
+        ):
+            # Mark consent as acknowledged
+            _mark_consent_acknowledged()
+
+            with patch("sys.stdin.isatty", return_value=False):
+                result = _display_consent_and_confirm(verbose=False)
+                assert result is True
+
+    def test_display_consent_keyboard_interrupt(self, tmp_path):
+        """Test handling of keyboard interrupt during consent."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", side_effect=KeyboardInterrupt),
+        ):
+            result = _display_consent_and_confirm(verbose=False)
+            assert result is False
+
+    def test_display_consent_eof_error(self, tmp_path):
+        """Test handling of EOF during consent."""
+        with (
+            patch(
+                "openhands.sdk.llm.auth.openai.get_credentials_dir",
+                return_value=tmp_path,
+            ),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", side_effect=EOFError),
+        ):
+            result = _display_consent_and_confirm(verbose=False)
+            assert result is False
