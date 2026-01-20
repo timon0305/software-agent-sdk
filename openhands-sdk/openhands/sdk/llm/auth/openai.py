@@ -10,9 +10,8 @@ Uses authlib for OAuth handling and aiohttp for the callback server.
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import platform
+import threading
 import time
 import webbrowser
 from typing import TYPE_CHECKING, Any, Literal
@@ -20,8 +19,10 @@ from urllib.parse import urlencode
 
 from aiohttp import web
 from authlib.common.security import generate_token
+from authlib.jose import JsonWebKey, jwt
+from authlib.jose.errors import JoseError
 from authlib.oauth2.rfc7636 import create_s256_code_challenge
-from httpx import AsyncClient
+from httpx import AsyncClient, Client
 
 from openhands.sdk.llm.auth.credentials import CredentialStore, OAuthCredentials
 from openhands.sdk.logger import get_logger
@@ -39,9 +40,11 @@ logger = get_logger(__name__)
 # OAuth configuration for OpenAI Codex
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 ISSUER = "https://auth.openai.com"
+JWKS_URL = f"{ISSUER}/.well-known/jwks.json"
 CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_OAUTH_PORT = 1455
 OAUTH_TIMEOUT_SECONDS = 300  # 5 minutes
+JWKS_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 # Models available via ChatGPT subscription (not API)
 OPENAI_CODEX_MODELS = frozenset(
@@ -54,6 +57,54 @@ OPENAI_CODEX_MODELS = frozenset(
 )
 
 
+# Thread-safe JWKS cache
+class _JWKSCache:
+    """Thread-safe cache for OpenAI's JWKS (JSON Web Key Set)."""
+
+    def __init__(self) -> None:
+        self._keys: dict[str, Any] = {}
+        self._fetched_at: float = 0
+        self._lock = threading.Lock()
+
+    def get_key_set(self) -> Any:
+        """Get the JWKS, fetching from OpenAI if cache is stale or empty.
+
+        Returns:
+            KeySet for verifying JWT signatures.
+
+        Raises:
+            RuntimeError: If JWKS cannot be fetched.
+        """
+        with self._lock:
+            now = time.time()
+            if not self._keys or (now - self._fetched_at) > JWKS_CACHE_TTL_SECONDS:
+                self._fetch_jwks()
+            return JsonWebKey.import_key_set(self._keys)
+
+    def _fetch_jwks(self) -> None:
+        """Fetch JWKS from OpenAI's well-known endpoint."""
+        try:
+            with Client(timeout=10) as client:
+                response = client.get(JWKS_URL)
+                response.raise_for_status()
+                self._keys = response.json()
+                self._fetched_at = time.time()
+                logger.debug(
+                    f"Fetched JWKS from OpenAI: {len(self._keys.get('keys', []))} keys"
+                )
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch OpenAI JWKS: {e}") from e
+
+    def clear(self) -> None:
+        """Clear the cache (useful for testing)."""
+        with self._lock:
+            self._keys = {}
+            self._fetched_at = 0
+
+
+_jwks_cache = _JWKSCache()
+
+
 def _generate_pkce() -> tuple[str, str]:
     """Generate PKCE verifier and challenge using authlib."""
     verifier = generate_token(43)
@@ -62,36 +113,28 @@ def _generate_pkce() -> tuple[str, str]:
 
 
 def _extract_chatgpt_account_id(access_token: str) -> str | None:
-    """Extract chatgpt_account_id from JWT access token.
+    """Extract chatgpt_account_id from JWT access token with signature verification.
 
-    Decodes the JWT payload without verification (since we trust the token
-    came from OpenAI's auth server) and extracts the account ID needed
-    for API requests.
+    Verifies the JWT signature using OpenAI's published JWKS before extracting
+    claims. This prevents attacks where a manipulated token could be injected
+    through OAuth callback interception.
 
     Args:
         access_token: The JWT access token from OAuth flow
 
     Returns:
-        The chatgpt_account_id if found, None otherwise
+        The chatgpt_account_id if found and signature is valid, None otherwise
     """
     try:
-        # JWT format: header.payload.signature
-        parts = access_token.split(".")
-        if len(parts) != 3:
-            logger.warning("Invalid JWT format: expected 3 parts")
-            return None
+        # Fetch JWKS and verify JWT signature
+        key_set = _jwks_cache.get_key_set()
+        claims = jwt.decode(access_token, key_set)
 
-        # Decode payload (add padding if needed)
-        payload_b64 = parts[1]
-        padding = 4 - len(payload_b64) % 4
-        if padding != 4:
-            payload_b64 += "=" * padding
-
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        payload = json.loads(payload_bytes)
+        # Validate standard claims (issuer)
+        claims.validate()
 
         # Extract account ID from nested structure
-        auth_info = payload.get("https://api.openai.com/auth", {})
+        auth_info = claims.get("https://api.openai.com/auth", {})
         account_id = auth_info.get("chatgpt_account_id")
 
         if account_id:
@@ -101,6 +144,13 @@ def _extract_chatgpt_account_id(access_token: str) -> str | None:
             logger.warning("chatgpt_account_id not found in JWT payload")
             return None
 
+    except JoseError as e:
+        logger.warning(f"JWT signature verification failed: {e}")
+        return None
+    except RuntimeError as e:
+        # JWKS fetch failed - log but don't crash
+        logger.warning(f"Could not verify JWT: {e}")
+        return None
     except Exception as e:
         logger.warning(f"Failed to decode JWT: {e}")
         return None
