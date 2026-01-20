@@ -7,6 +7,7 @@ These tests verify that:
 1. Plugins are loaded from the `plugins` list using load_plugins()
 2. Hooks, skills, and MCP config are properly merged
 3. Plugin list is not persisted (only loaded content is)
+4. Explicit hook_config is merged with plugin hooks (explicit first)
 """
 
 import tempfile
@@ -29,6 +30,7 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
+from openhands.sdk.hooks import HookConfig, HookDefinition, HookMatcher
 from openhands.sdk.plugin import PluginSource
 from openhands.sdk.workspace import LocalWorkspace
 
@@ -320,3 +322,140 @@ async def test_plugins_not_persisted_in_stored_conversation(
             # The stored object should not have plugins field set
             # (since it was excluded in model_dump)
             assert stored.plugins is None
+
+
+# Tests for explicit hook_config
+
+
+def test_start_conversation_request_has_hook_config_field():
+    """Verify StartConversationRequest has hook_config field."""
+    fields = StartConversationRequest.model_fields
+    assert "hook_config" in fields
+
+
+@pytest.mark.asyncio
+async def test_start_conversation_with_explicit_hook_config(conversation_service):
+    """Test start_conversation with explicit hook_config (no plugins)."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        explicit_hooks = HookConfig(
+            pre_tool_use=[
+                HookMatcher(
+                    matcher="*",
+                    hooks=[HookDefinition(type="command", command="echo explicit")],
+                )
+            ]
+        )
+        request = StartConversationRequest(
+            agent=Agent(
+                llm=LLM(model="gpt-4", usage_id="test-llm"),
+                tools=[],
+            ),
+            workspace=LocalWorkspace(working_dir=temp_dir),
+            hook_config=explicit_hooks,
+        )
+
+        with patch(
+            "openhands.agent_server.conversation_service.EventService"
+        ) as mock_event_service_class:
+            mock_event_service = AsyncMock(spec=EventService)
+            mock_event_service_class.return_value = mock_event_service
+
+            mock_state = ConversationState(
+                id=uuid4(),
+                agent=request.agent,
+                workspace=request.workspace,
+                execution_status=ConversationExecutionStatus.IDLE,
+                confirmation_policy=request.confirmation_policy,
+            )
+            mock_event_service.get_state.return_value = mock_state
+            mock_event_service.stored = StoredConversation(
+                id=mock_state.id,
+                **request.model_dump(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+            await conversation_service.start_conversation(request)
+
+            # Verify explicit hook_config is used
+            stored = mock_event_service_class.call_args.kwargs["stored"]
+            assert stored.hook_config is not None
+            assert len(stored.hook_config.pre_tool_use) == 1
+            hook_cmd = stored.hook_config.pre_tool_use[0].hooks[0].command
+            assert hook_cmd == "echo explicit"
+
+
+@pytest.mark.asyncio
+async def test_start_conversation_merges_explicit_and_plugin_hooks(
+    conversation_service, tmp_path
+):
+    """Test that explicit hook_config is merged with plugin hooks."""
+    # Create plugin with hooks
+    plugin_dir = create_test_plugin_dir(
+        tmp_path,
+        hooks={
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "*",
+                        "hooks": [{"type": "command", "command": "echo plugin"}],
+                    }
+                ]
+            }
+        },
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        explicit_hooks = HookConfig(
+            pre_tool_use=[
+                HookMatcher(
+                    matcher="*",
+                    hooks=[HookDefinition(type="command", command="echo explicit")],
+                )
+            ]
+        )
+        request = StartConversationRequest(
+            agent=Agent(
+                llm=LLM(model="gpt-4", usage_id="test-llm"),
+                tools=[],
+            ),
+            workspace=LocalWorkspace(working_dir=temp_dir),
+            plugins=[PluginSource(source=str(plugin_dir))],
+            hook_config=explicit_hooks,
+        )
+
+        with patch(
+            "openhands.agent_server.conversation_service.EventService"
+        ) as mock_event_service_class:
+            mock_event_service = AsyncMock(spec=EventService)
+            mock_event_service_class.return_value = mock_event_service
+
+            mock_state = ConversationState(
+                id=uuid4(),
+                agent=request.agent,
+                workspace=request.workspace,
+                execution_status=ConversationExecutionStatus.IDLE,
+                confirmation_policy=request.confirmation_policy,
+            )
+            mock_event_service.get_state.return_value = mock_state
+            mock_event_service.stored = StoredConversation(
+                id=mock_state.id,
+                agent=request.agent,
+                **request.model_dump(exclude={"agent"}),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+
+            await conversation_service.start_conversation(request)
+
+            # Verify hooks were merged (explicit + plugin)
+            stored = mock_event_service_class.call_args.kwargs["stored"]
+            assert stored.hook_config is not None
+            # Should have 2 hook matchers (explicit first, then plugin)
+            assert len(stored.hook_config.pre_tool_use) == 2
+            # Explicit hooks should come first
+            explicit_cmd = stored.hook_config.pre_tool_use[0].hooks[0].command
+            assert explicit_cmd == "echo explicit"
+            # Plugin hooks should come second
+            plugin_cmd = stored.hook_config.pre_tool_use[1].hooks[0].command
+            assert plugin_cmd == "echo plugin"

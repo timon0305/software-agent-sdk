@@ -36,7 +36,7 @@ def merge_skills(
 
     if max_skills is not None and len(skills_by_name) > max_skills:
         raise ValueError(
-            f"Plugin has too many skills ({len(skills_by_name)} > {max_skills})"
+            f"Total skills ({len(skills_by_name)}) exceeds maximum ({max_skills})"
         )
 
     merged_skills = list(skills_by_name.values())
@@ -81,8 +81,6 @@ def merge_mcp_configs(
 
     # Merge mcpServers by server name (Claude Code compatible behavior)
     if "mcpServers" in plugin_config:
-        if "mcpServers" not in result:
-            result["mcpServers"] = {}
         result["mcpServers"] = {
             **result.get("mcpServers", {}),
             **plugin_config["mcpServers"],

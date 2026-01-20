@@ -25,7 +25,7 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.plugin import load_plugins
+from openhands.sdk.plugin import load_plugins, merge_hook_configs
 from openhands.sdk.utils.cipher import Cipher
 
 
@@ -238,22 +238,30 @@ class ConversationService:
 
         # Load plugins using SDK utility (runs in thread pool for async)
         agent = request.agent
-        hook_config = None
+        plugin_hooks = None
 
         if request.plugins:
             # Load plugins in thread pool to avoid blocking the event loop
-            agent, hook_config = await asyncio.to_thread(
+            agent, plugin_hooks = await asyncio.to_thread(
                 load_plugins, request.plugins, agent
             )
             logger.info(f"Loaded {len(request.plugins)} plugin(s) for conversation")
 
-        # Create stored conversation with updated agent and hook_config.
+        # Merge explicit hook_config with plugin hooks
+        # Explicit hooks run first (before plugin hooks)
+        final_hook_config = request.hook_config
+        if plugin_hooks and final_hook_config:
+            final_hook_config = merge_hook_configs([final_hook_config, plugin_hooks])
+        elif plugin_hooks:
+            final_hook_config = plugin_hooks
+
+        # Create stored conversation with updated agent and merged hook_config.
         # Plugins are ephemeral input (fetched/loaded above), not persistent state.
         stored = StoredConversation(
             id=conversation_id,
-            hook_config=hook_config,
-            **request.model_dump(exclude={"plugins", "agent"}),
+            **request.model_dump(exclude={"plugins", "agent", "hook_config"}),
             agent=agent,
+            hook_config=final_hook_config,
         )
         event_service = await self._start_event_service(stored)
         initial_message = request.initial_message
