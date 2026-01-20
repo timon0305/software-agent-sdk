@@ -56,6 +56,12 @@ def merge_mcp_configs(
     - mcpServers: deep-merge by server name (last plugin wins for same server)
     - Other top-level keys: shallow override (plugin wins)
 
+    We special-case mcpServers because it's keyed by server name and multiple
+    plugins should be able to contribute different servers. Other keys get
+    shallow override because we don't know their semantics - a generic deep-merge
+    would be wrong if a key is meant to be atomic. If Claude Code adds new
+    nested structures that need merge-by-key (like mcpServers), add them here.
+
     Args:
         base_config: Base MCP configuration
         plugin_config: Plugin MCP configuration
