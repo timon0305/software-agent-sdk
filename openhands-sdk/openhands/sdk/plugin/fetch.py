@@ -194,7 +194,7 @@ def fetch_plugin(
     cache_dir: Path | None = None,
     ref: str | None = None,
     update: bool = True,
-    subpath: str | None = None,
+    repo_path: str | None = None,
     git_helper: GitHelper | None = None,
 ) -> Path:
     """Fetch a plugin from a remote source and return the local cached path.
@@ -208,25 +208,27 @@ def fetch_plugin(
         cache_dir: Directory for caching. Defaults to ~/.openhands/cache/plugins/
         ref: Optional branch, tag, or commit to checkout.
         update: If True and cache exists, update it. If False, use cached version as-is.
-        subpath: Optional subdirectory path within the repo. If specified, the returned
-            path will point to this subdirectory instead of the repository root.
+        repo_path: Subdirectory path within the git repository
+            (e.g., 'plugins/my-plugin' for monorepos). Only relevant for git
+            sources, not local paths. If specified, the returned path will
+            point to this subdirectory instead of the repository root.
         git_helper: GitHelper instance (for testing). Defaults to global instance.
 
     Returns:
         Path to the local plugin directory (ready for Plugin.load()).
-        If subpath is specified, returns the path to that subdirectory.
+        If repo_path is specified, returns the path to that subdirectory.
 
     Raises:
-        PluginFetchError: If fetching fails or subpath doesn't exist.
+        PluginFetchError: If fetching fails or repo_path doesn't exist.
     """
     source_type, url = parse_plugin_source(source)
 
     if source_type == "local":
-        return _resolve_local_source(url, subpath)
+        return _resolve_local_source(url, repo_path)
 
     if cache_dir is None:
         cache_dir = DEFAULT_CACHE_DIR
 
     return _fetch_remote_source(
-        url, cache_dir, ref, update, subpath, git_helper, source
+        url, cache_dir, ref, update, repo_path, git_helper, source
     )

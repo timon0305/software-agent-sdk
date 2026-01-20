@@ -190,7 +190,7 @@ class AgentContext(BaseModel):
             plugin_dir = Plugin.fetch(
                 source=self.plugin_source,
                 ref=self.plugin_ref,
-                subpath=self.plugin_path,
+                repo_path=self.plugin_path,
             )
             plugin = Plugin.load(plugin_dir)
 
