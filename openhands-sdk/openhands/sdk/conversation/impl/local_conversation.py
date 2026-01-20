@@ -126,20 +126,17 @@ class LocalConversation(BaseConversation):
         # initialized instances during interpreter shutdown.
         self._cleanup_initiated = False
 
-        # Load plugins if specified (recommended pattern)
-        final_agent = agent
-        final_hook_config = hook_config
+        # Load plugins if specified (rebinds locals, does not mutate caller's objects)
         if plugins:
-            final_agent, plugin_hooks = load_plugins(plugins, agent)
+            agent, plugin_hooks = load_plugins(plugins, agent)
             logger.info(f"Loaded {len(plugins)} plugin(s) via Conversation")
             # Combine explicit hook_config with plugin hooks
             if plugin_hooks and hook_config:
-                # Merge: explicit hooks first, then plugin hooks (concatenate)
-                final_hook_config = merge_hook_configs([hook_config, plugin_hooks])
+                hook_config = merge_hook_configs([hook_config, plugin_hooks])
             elif plugin_hooks:
-                final_hook_config = plugin_hooks
+                hook_config = plugin_hooks
 
-        self.agent = final_agent
+        self.agent = agent
         if isinstance(workspace, (str, Path)):
             # LocalWorkspace accepts both str and Path via BeforeValidator
             workspace = LocalWorkspace(working_dir=workspace)
@@ -197,9 +194,9 @@ class LocalConversation(BaseConversation):
 
         # If hooks configured, wrap with hook processor that forwards to base chain
         self._hook_processor = None
-        if final_hook_config is not None:
+        if hook_config is not None:
             self._hook_processor, self._on_event = create_hook_callback(
-                hook_config=final_hook_config,
+                hook_config=hook_config,
                 working_dir=str(self.workspace.working_dir),
                 session_id=str(desired_id),
                 original_callback=base_callback,
