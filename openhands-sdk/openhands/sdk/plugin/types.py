@@ -63,7 +63,9 @@ class PluginSource(BaseModel):
             raise ValueError("repo_path must be relative, not absolute")
         # No parent directory traversal
         if ".." in Path(v).parts:
-            raise ValueError("repo_path cannot contain '..' (parent directory traversal)")
+            raise ValueError(
+                "repo_path cannot contain '..' (parent directory traversal)"
+            )
         return v
 
 
