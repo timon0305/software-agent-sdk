@@ -96,7 +96,12 @@ class CredentialStore:
         with open(creds_file, "w") as f:
             json.dump(credentials.model_dump(), f, indent=2)
         # Set restrictive permissions (owner read/write only)
-        creds_file.chmod(0o600)
+        # Set restrictive permissions (owner read/write only)
+        # Note: On Windows, NTFS ACLs should be used instead
+        if os.name != 'nt':  # Not Windows
+            creds_file.chmod(0o600)
+        else:
+            logger.warning("File permissions on Windows should be manually restricted")
 
     def delete(self, vendor: str) -> bool:
         """Delete stored credentials for a vendor.
