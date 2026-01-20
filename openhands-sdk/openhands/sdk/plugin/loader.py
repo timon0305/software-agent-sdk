@@ -57,12 +57,12 @@ def merge_hook_configs(configs: list[HookConfig]) -> HookConfig | None:
     )
 
     # Collect all matchers by event type
-    merged: dict[str, list] = {field: [] for field in hook_fields}
+    collected: dict[str, list] = {field: [] for field in hook_fields}
     for config in configs:
         for field in hook_fields:
-            merged[field].extend(getattr(config, field))
+            collected[field].extend(getattr(config, field))
 
-    merged = HookConfig(**merged)
+    merged = HookConfig(**collected)
 
     # Return None if the merged config is empty
     if merged.is_empty():
