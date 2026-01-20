@@ -36,7 +36,7 @@ from openhands.sdk.llm import LLM, Message, TextContent
 from openhands.sdk.llm.llm_registry import LLMRegistry
 from openhands.sdk.logger import get_logger
 from openhands.sdk.observability.laminar import observe
-from openhands.sdk.plugin import PluginSource, load_plugins, merge_hook_configs
+from openhands.sdk.plugin import PluginSource, load_plugins
 from openhands.sdk.security.analyzer import SecurityAnalyzerBase
 from openhands.sdk.security.confirmation_policy import (
     ConfirmationPolicyBase,
@@ -132,7 +132,7 @@ class LocalConversation(BaseConversation):
             logger.info(f"Loaded {len(plugins)} plugin(s) via Conversation")
             # Combine explicit hook_config with plugin hooks
             if plugin_hooks and hook_config:
-                hook_config = merge_hook_configs([hook_config, plugin_hooks])
+                hook_config = HookConfig.merge([hook_config, plugin_hooks])
             elif plugin_hooks:
                 hook_config = plugin_hooks
 

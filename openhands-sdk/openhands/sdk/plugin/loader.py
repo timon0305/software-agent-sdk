@@ -24,27 +24,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def merge_hook_configs(configs: list[HookConfig]) -> HookConfig | None:
-    """Merge multiple hook configs by concatenating handlers per event type.
-
-    This is a convenience function that delegates to HookConfig.merge().
-
-    Args:
-        configs: List of HookConfig objects to merge.
-
-    Returns:
-        A merged HookConfig with all matchers concatenated, or None if no configs.
-
-    Example:
-        >>> config1 = HookConfig(pre_tool_use=[HookMatcher(matcher="*")])
-        >>> config2 = HookConfig(pre_tool_use=[HookMatcher(matcher="terminal")])
-        >>> merged = merge_hook_configs([config1, config2])
-        >>> len(merged.pre_tool_use)  # Both matchers combined
-        2
-    """
-    return HookConfig.merge(configs)
-
-
 def load_plugins(
     plugin_specs: list[PluginSource],
     agent: AgentBase,
@@ -119,7 +98,7 @@ def load_plugins(
             all_hooks.append(plugin.hooks)
 
     # Combine all hook configs (concatenation semantics)
-    combined_hooks = merge_hook_configs(all_hooks)
+    combined_hooks = HookConfig.merge(all_hooks)
 
     # Create updated agent with merged content
     updated_agent = agent.model_copy(

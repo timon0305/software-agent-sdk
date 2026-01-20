@@ -25,7 +25,8 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.plugin import load_plugins, merge_hook_configs
+from openhands.sdk.hooks import HookConfig
+from openhands.sdk.plugin import load_plugins
 from openhands.sdk.utils.cipher import Cipher
 
 
@@ -251,7 +252,7 @@ class ConversationService:
         # Explicit hooks run first (before plugin hooks)
         final_hook_config = request.hook_config
         if plugin_hooks and final_hook_config:
-            final_hook_config = merge_hook_configs([final_hook_config, plugin_hooks])
+            final_hook_config = HookConfig.merge([final_hook_config, plugin_hooks])
         elif plugin_hooks:
             final_hook_config = plugin_hooks
 

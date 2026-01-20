@@ -1,4 +1,4 @@
-"""Tests for load_plugins() utility and merge_hook_configs()."""
+"""Tests for load_plugins() utility and HookConfig.merge()."""
 
 import json
 from pathlib import Path
@@ -15,7 +15,6 @@ from openhands.sdk.plugin import (
     PluginFetchError,
     PluginSource,
     load_plugins,
-    merge_hook_configs,
 )
 
 
@@ -101,12 +100,12 @@ def create_test_plugin(
     return plugin_dir
 
 
-class TestMergeHookConfigs:
-    """Tests for merge_hook_configs function."""
+class TestHookConfigMerge:
+    """Tests for HookConfig.merge class method."""
 
     def test_merge_empty_list_returns_none(self):
         """Test that empty list returns None."""
-        result = merge_hook_configs([])
+        result = HookConfig.merge([])
         assert result is None
 
     def test_merge_single_config(self):
@@ -116,7 +115,7 @@ class TestMergeHookConfigs:
                 HookMatcher(matcher="*", hooks=[HookDefinition(command="test")])
             ]
         )
-        result = merge_hook_configs([config])
+        result = HookConfig.merge([config])
         assert result is not None
         assert len(result.pre_tool_use) == 1
         assert result.pre_tool_use[0].matcher == "*"
@@ -133,7 +132,7 @@ class TestMergeHookConfigs:
                 HookMatcher(matcher="*", hooks=[HookDefinition(command="cmd2")])
             ]
         )
-        result = merge_hook_configs([config1, config2])
+        result = HookConfig.merge([config1, config2])
         assert result is not None
         assert len(result.pre_tool_use) == 2
         assert result.pre_tool_use[0].matcher == "terminal"
@@ -151,7 +150,7 @@ class TestMergeHookConfigs:
                 HookMatcher(matcher="*", hooks=[HookDefinition(command="post")])
             ]
         )
-        result = merge_hook_configs([config1, config2])
+        result = HookConfig.merge([config1, config2])
         assert result is not None
         assert len(result.pre_tool_use) == 1
         assert len(result.post_tool_use) == 1
@@ -180,7 +179,7 @@ class TestMergeHookConfigs:
             ],
             stop=[HookMatcher(matcher="*", hooks=[HookDefinition(command="c6")])],
         )
-        result = merge_hook_configs([config1, config2, config3])
+        result = HookConfig.merge([config1, config2, config3])
         assert result is not None
         assert len(result.pre_tool_use) == 1
         assert len(result.post_tool_use) == 1
@@ -193,7 +192,7 @@ class TestMergeHookConfigs:
         """Test merging only empty configs returns None."""
         config1 = HookConfig()
         config2 = HookConfig()
-        result = merge_hook_configs([config1, config2])
+        result = HookConfig.merge([config1, config2])
         assert result is None
 
 
