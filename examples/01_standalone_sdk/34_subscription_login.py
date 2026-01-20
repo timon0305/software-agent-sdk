@@ -32,6 +32,12 @@ llm = LLM.subscription_login(
     model="gpt-5.2-codex",  # or "gpt-5.2", "gpt-5.1-codex-max", "gpt-5.1-codex-mini"
 )
 
+# Alternative: Force a fresh login (useful if credentials are stale)
+# llm = LLM.subscription_login(model="gpt-5.2-codex", force_login=True)
+
+# Alternative: Disable auto-opening browser (prints URL to console instead)
+# llm = LLM.subscription_login(model="gpt-5.2-codex", open_browser=False)
+
 # Verify subscription mode is active
 print(f"Using subscription mode: {llm.is_subscription}")
 
@@ -50,10 +56,3 @@ conversation = Conversation(agent=agent, workspace=cwd)
 conversation.send_message("List the files in the current directory.")
 conversation.run()
 print("Done!")
-
-
-# Alternative: Force a fresh login (useful if credentials are stale)
-# llm = LLM.subscription_login(model="gpt-5.2-codex", force_login=True)
-
-# Alternative: Disable auto-opening browser (prints URL to console instead)
-# llm = LLM.subscription_login(model="gpt-5.2-codex", open_browser=False)
