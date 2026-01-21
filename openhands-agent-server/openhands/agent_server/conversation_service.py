@@ -25,12 +25,14 @@ from openhands.sdk.conversation.state import (
     ConversationExecutionStatus,
     ConversationState,
 )
-from openhands.sdk.observability.laminar import (
-    end_active_span,
-    should_enable_observability,
-    start_active_span,
-)
+from openhands.sdk.observability.laminar import should_enable_observability
 from openhands.sdk.utils.cipher import Cipher
+
+
+try:
+    from lmnr import Laminar
+except ImportError:
+    Laminar = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,8 @@ class ConversationService:
     _conversation_webhook_subscribers: list["ConversationWebhookSubscriber"] = field(
         default_factory=list, init=False
     )
+    # Track observability spans per conversation to avoid global stack corruption
+    _conversation_spans: dict[UUID, "Laminar"] = field(default_factory=dict, init=False)
 
     async def get_conversation(self, conversation_id: UUID) -> ConversationInfo | None:
         if self._event_services is None:
@@ -243,10 +247,13 @@ class ConversationService:
         stored = StoredConversation(id=conversation_id, **request.model_dump())
         event_service = await self._start_event_service(stored)
 
-        # Start observability span on server side for remote conversations
-        # This ensures OTEL traces are properly associated with the conversation session
-        if should_enable_observability():
-            start_active_span("conversation", session_id=str(conversation_id))
+        # Start observability span on server side for remote conversations.
+        # Store span per-conversation to avoid global stack corruption with
+        # concurrent conversations.
+        if should_enable_observability() and Laminar is not None:
+            span = Laminar.start_active_span("conversation")
+            Laminar.set_trace_session_id(str(conversation_id))
+            self._conversation_spans[conversation_id] = span
 
         initial_message = request.initial_message
         if initial_message:
@@ -312,10 +319,12 @@ class ConversationService:
                     f"{conversation_id}: {e}"
                 )
 
-            # End observability span for this conversation
-            if should_enable_observability():
+            # End observability span for this specific conversation
+            span = self._conversation_spans.pop(conversation_id, None)
+            if span is not None:
                 try:
-                    end_active_span()
+                    if span.is_recording():
+                        span.end()
                 except Exception as e:
                     logger.debug(f"Failed to end observability span: {e}")
 
