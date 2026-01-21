@@ -641,3 +641,111 @@ def test_conversation_restart_with_different_agent_context():
             "You current working directory is: /Users/jpshack"
             in new_conversation.agent.agent_context.system_message_suffix
         )
+
+
+def test_conversation_restore_emits_system_prompt_update_when_tools_change():
+    """Test restore with different tools emits SystemPromptUpdateEvent.
+
+    This ensures the persisted event log accurately reflects what the LLM sees,
+    maintaining the invariant that the event log is the source of truth.
+    """
+    from openhands.sdk.event import SystemPromptEvent, SystemPromptUpdateEvent
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        llm = LLM(model="gpt-4o-mini", api_key=SecretStr("test-key"))
+        conversation_id = uuid.uuid4()
+
+        # Phase A: Create conversation with file_editor only
+        agent_a = Agent(llm=llm, tools=[Tool(name="FileEditorTool")])
+
+        conversation_a = LocalConversation(
+            agent=agent_a,
+            workspace=temp_dir,
+            persistence_dir=temp_dir,
+            conversation_id=conversation_id,
+            visualizer=None,
+        )
+
+        # Verify initial SystemPromptEvent was emitted
+        events_a = list(conversation_a.state.events)
+        system_events_a = [e for e in events_a if isinstance(e, SystemPromptEvent)]
+        assert len(system_events_a) == 1
+        assert "file_editor" in [t.name for t in system_events_a[0].tools]
+
+        # Close the conversation
+        conversation_a.close()
+
+        # Phase B: Restore with additional tool (terminal)
+        agent_b = Agent(
+            llm=llm,
+            tools=[Tool(name="FileEditorTool"), Tool(name="TerminalTool")],
+        )
+
+        conversation_b = LocalConversation(
+            agent=agent_b,
+            workspace=temp_dir,
+            persistence_dir=temp_dir,
+            conversation_id=conversation_id,
+            visualizer=None,
+        )
+
+        # Verify SystemPromptUpdateEvent was emitted
+        events_b = list(conversation_b.state.events)
+        update_events = [e for e in events_b if isinstance(e, SystemPromptUpdateEvent)]
+
+        assert len(update_events) == 1, "Expected exactly one SystemPromptUpdateEvent"
+        update_event = update_events[0]
+        assert update_event.reason == "tools_changed"
+
+        # Verify the update event has both tools
+        update_tool_names = {t.name for t in update_event.tools}
+        assert "file_editor" in update_tool_names
+        assert "terminal" in update_tool_names
+
+        conversation_b.close()
+
+
+def test_conversation_restore_no_update_when_tools_unchanged():
+    """Test restore with same tools does NOT emit SystemPromptUpdateEvent."""
+    from openhands.sdk.event import SystemPromptUpdateEvent
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        llm = LLM(model="gpt-4o-mini", api_key=SecretStr("test-key"))
+        conversation_id = uuid.uuid4()
+
+        # Phase A: Create conversation with file_editor
+        agent_a = Agent(llm=llm, tools=[Tool(name="FileEditorTool")])
+
+        conversation_a = LocalConversation(
+            agent=agent_a,
+            workspace=temp_dir,
+            persistence_dir=temp_dir,
+            conversation_id=conversation_id,
+            visualizer=None,
+        )
+
+        events_a = list(conversation_a.state.events)
+        initial_event_count = len(events_a)
+        conversation_a.close()
+
+        # Phase B: Restore with SAME tools
+        agent_b = Agent(llm=llm, tools=[Tool(name="FileEditorTool")])
+
+        conversation_b = LocalConversation(
+            agent=agent_b,
+            workspace=temp_dir,
+            persistence_dir=temp_dir,
+            conversation_id=conversation_id,
+            visualizer=None,
+        )
+
+        # Verify NO SystemPromptUpdateEvent was emitted
+        events_b = list(conversation_b.state.events)
+        update_events = [e for e in events_b if isinstance(e, SystemPromptUpdateEvent)]
+
+        assert len(update_events) == 0, "No SystemPromptUpdateEvent should be emitted"
+
+        # Event count should be the same (no new events added)
+        assert len(events_b) == initial_event_count
+
+        conversation_b.close()

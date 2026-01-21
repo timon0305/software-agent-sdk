@@ -71,7 +71,12 @@ from litellm.types.utils import ModelResponse
 from pydantic import SecretStr
 
 from openhands.sdk import LLM, Agent, Conversation, Tool
-from openhands.sdk.event import Event, LLMConvertibleEvent, SystemPromptEvent
+from openhands.sdk.event import (
+    Event,
+    LLMConvertibleEvent,
+    SystemPromptEvent,
+    SystemPromptUpdateEvent,
+)
 from openhands.tools.file_editor import FileEditorTool
 from openhands.tools.terminal import TerminalTool
 
@@ -89,6 +94,9 @@ class Snapshot:
     system_prompt_event: SystemPromptEvent
     system_prompt_first_paragraph: str
     system_prompt_tool_names: list[str]
+    # New: track SystemPromptUpdateEvent for restore scenarios
+    system_prompt_update_event: SystemPromptUpdateEvent | None
+    system_prompt_update_tool_names: list[str] | None
     telemetry_files: list[Path]
     telemetry_hashes: dict[str, str]
     last_telemetry_payload: dict[str, Any] | None
@@ -215,6 +223,15 @@ def _snapshot(
     system_first_para = _first_paragraph(system_event.system_prompt.text)
     system_tool_names = sorted({t.name for t in system_event.tools})
 
+    # Check for SystemPromptUpdateEvent (added on restore when tools/prompt change)
+    update_events = [e for e in events if isinstance(e, SystemPromptUpdateEvent)]
+    update_event: SystemPromptUpdateEvent | None = (
+        update_events[-1] if update_events else None
+    )
+    update_tool_names: list[str] | None = (
+        sorted({t.name for t in update_event.tools}) if update_event else None
+    )
+
     telemetry_files = sorted(telemetry_dir.glob("*.json"))
     last_payload = _read_json(telemetry_files[-1]) if telemetry_files else None
 
@@ -230,6 +247,8 @@ def _snapshot(
         system_prompt_event=system_event,
         system_prompt_first_paragraph=system_first_para,
         system_prompt_tool_names=system_tool_names,
+        system_prompt_update_event=update_event,
+        system_prompt_update_tool_names=update_tool_names,
         telemetry_files=telemetry_files,
         telemetry_hashes=_file_hashes(telemetry_dir) if telemetry_dir.exists() else {},
         last_telemetry_payload=last_payload,
@@ -309,7 +328,7 @@ def _print_snapshot_md(s: Snapshot) -> None:
     print(f"- Event files: `{len(s.event_files)}`")
     print(f"- Event types: `{s.event_types}`")
     print()
-    print("#### SystemPromptEvent (persisted)")
+    print("#### SystemPromptEvent (persisted, original)")
     print()
     print(f"- Tools in persisted SystemPromptEvent: `{s.system_prompt_tool_names}`")
     print("- System prompt (first paragraph):")
@@ -318,6 +337,16 @@ def _print_snapshot_md(s: Snapshot) -> None:
     print(s.system_prompt_first_paragraph)
     print("```")
     print()
+
+    # Print SystemPromptUpdateEvent info if present
+    if s.system_prompt_update_event is not None:
+        print("#### SystemPromptUpdateEvent (persisted, after restore)")
+        print()
+        print(f"- Reason: `{s.system_prompt_update_event.reason}`")
+        print(
+            f"- Tools in SystemPromptUpdateEvent: `{s.system_prompt_update_tool_names}`"
+        )
+        print()
 
     print("### telemetry logs")
     print()
@@ -515,11 +544,25 @@ def main() -> None:
         f"`{tool_specs_a}` -> `{tool_specs_b}`"
     )
     print(
-        "- Persisted `SystemPromptEvent.tools` did not get rewritten on restore: "
+        "- Persisted `SystemPromptEvent.tools` (original) unchanged: "
         f"`{snap_a2.system_prompt_tool_names}` == `{persisted_system_tools}`"
     )
+
+    # NEW: Check for SystemPromptUpdateEvent
+    if snap_b2.system_prompt_update_event is not None:
+        print(
+            "- ✅ `SystemPromptUpdateEvent` was persisted on restore with reason: "
+            f"`{snap_b2.system_prompt_update_event.reason}`"
+        )
+        print(
+            "- ✅ `SystemPromptUpdateEvent.tools` contains new tool: "
+            f"`{snap_b2.system_prompt_update_tool_names}`"
+        )
+    else:
+        print("- ❌ No `SystemPromptUpdateEvent` found (expected one)")
+
     print(
-        "- Tools sent to LLM after restore (per telemetry) include the added tool: "
+        "- Tools sent to LLM after restore (per telemetry) include added tool: "
         f"`{telemetry_tools_b}`"
     )
     print()

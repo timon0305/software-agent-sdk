@@ -25,6 +25,7 @@ from openhands.sdk.event import (
     MessageEvent,
     ObservationEvent,
     SystemPromptEvent,
+    SystemPromptUpdateEvent,
     TokenEvent,
     UserRejectObservation,
 )
@@ -103,14 +104,13 @@ class Agent(AgentBase):
         on_event: ConversationCallbackType,
     ) -> None:
         super().init_state(state, on_event=on_event)
-        # TODO(openhands): we should add test to test this init_state will actually
-        # modify state in-place
 
-        llm_convertible_messages = [
+        llm_convertible_events = [
             event for event in state.events if isinstance(event, LLMConvertibleEvent)
         ]
-        if len(llm_convertible_messages) == 0:
-            # Prepare system message
+
+        if len(llm_convertible_events) == 0:
+            # Fresh conversation: emit initial SystemPromptEvent
             event = SystemPromptEvent(
                 source="agent",
                 system_prompt=TextContent(text=self.system_message),
@@ -120,6 +120,73 @@ class Agent(AgentBase):
                 tools=list(self.tools_map.values()),
             )
             on_event(event)
+        else:
+            # Restored conversation: check if system prompt or tools changed
+            self._maybe_emit_system_prompt_update(
+                llm_convertible_events, on_event=on_event
+            )
+
+    def _maybe_emit_system_prompt_update(
+        self,
+        events: list[LLMConvertibleEvent],
+        on_event: ConversationCallbackType,
+    ) -> None:
+        """Emit SystemPromptUpdateEvent if agent config changed since last persisted.
+
+        This is called on conversation restore to check if the runtime agent has
+        different tools or system prompt than what was persisted. If so, we emit
+        a SystemPromptUpdateEvent to record the change in the event log, ensuring
+        the LLM sees the updated configuration.
+        """
+        # Find the latest system prompt event (original or update)
+        latest_system_event: SystemPromptEvent | SystemPromptUpdateEvent | None = None
+        for event in reversed(events):
+            if isinstance(event, (SystemPromptEvent, SystemPromptUpdateEvent)):
+                latest_system_event = event
+                break
+
+        if latest_system_event is None:
+            # No system prompt event found - unusual, but not an error
+            logger.warning(
+                "No SystemPromptEvent found in restored conversation events. "
+                "Skipping system prompt update check."
+            )
+            return
+
+        # Get current runtime values
+        current_tools = list(self.tools_map.values())
+        current_system_prompt = self.system_message
+
+        # Compare with persisted values
+        persisted_tool_names = {t.name for t in latest_system_event.tools}
+        current_tool_names = {t.name for t in current_tools}
+
+        tools_changed = persisted_tool_names != current_tool_names
+        prompt_changed = latest_system_event.system_prompt.text != current_system_prompt
+
+        if not tools_changed and not prompt_changed:
+            return  # No changes, no update needed
+
+        # Determine reason for the update
+        if tools_changed and prompt_changed:
+            reason = "tools_and_system_prompt_changed"
+        elif tools_changed:
+            reason = "tools_changed"
+        else:
+            reason = "system_prompt_changed"
+
+        logger.info(
+            f"Emitting SystemPromptUpdateEvent (reason={reason}): "
+            f"tools_changed={tools_changed}, prompt_changed={prompt_changed}"
+        )
+
+        update_event = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text=current_system_prompt),
+            tools=current_tools,
+            reason=reason,
+        )
+        on_event(update_event)
 
     def _should_evaluate_with_critic(self, action: Action | None) -> bool:
         """Determine if critic should evaluate based on action type and mode."""

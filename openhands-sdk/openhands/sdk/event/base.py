@@ -89,18 +89,42 @@ class LLMConvertibleEvent(Event, ABC):
 
     @staticmethod
     def events_to_messages(events: list["LLMConvertibleEvent"]) -> list[Message]:
-        """Convert event stream to LLM message stream, handling multi-action batches"""
-        # TODO: We should add extensive tests for this
+        """Convert event stream to LLM message stream, handling multi-action batches.
+
+        Implements "latest system prompt wins" semantics: when multiple
+        SystemPromptEvent or SystemPromptUpdateEvent exist in the event list,
+        only the latest one is converted to a system message. The system message
+        is always placed first in the output, as expected by LLM APIs.
+        """
         from openhands.sdk.event.llm_convertible import ActionEvent
+        from openhands.sdk.event.llm_convertible.system import (
+            SystemPromptEvent,
+            SystemPromptUpdateEvent,
+        )
+
+        # Find the latest system prompt event (either type)
+        latest_system_event: SystemPromptEvent | SystemPromptUpdateEvent | None = None
+        for event in events:
+            if isinstance(event, (SystemPromptEvent, SystemPromptUpdateEvent)):
+                latest_system_event = event
 
         messages = []
-        i = 0
 
+        # Add system message first if we have one
+        if latest_system_event is not None:
+            messages.append(latest_system_event.to_llm_message())
+
+        i = 0
         while i < len(events):
             event = events[i]
 
+            # Skip all system prompt events (we already added the latest one first)
+            if isinstance(event, (SystemPromptEvent, SystemPromptUpdateEvent)):
+                i += 1
+                continue
+
             if isinstance(event, ActionEvent):
-                # Collect all ActionEvents from same LLM respone
+                # Collect all ActionEvents from same LLM response
                 # This happens when function calling happens
                 batch_events: list[ActionEvent] = [event]
                 response_id = event.llm_response_id

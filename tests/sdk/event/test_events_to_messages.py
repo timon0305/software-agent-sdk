@@ -13,6 +13,7 @@ from openhands.sdk.event.llm_convertible import (
     MessageEvent,
     ObservationEvent,
     SystemPromptEvent,
+    SystemPromptUpdateEvent,
 )
 from openhands.sdk.llm import (
     ImageContent,
@@ -453,3 +454,219 @@ class TestEventsToMessages:
         assert msgs[0].role == "assistant"
         assert msgs[1].role == "tool"
         assert msgs[1].tool_call_id == "call_ne"
+
+
+class TestSystemPromptUpdateEvent:
+    """Tests for SystemPromptUpdateEvent and 'latest system prompt wins' behavior."""
+
+    def test_single_system_prompt_update_event(self):
+        """Test conversion of a single SystemPromptUpdateEvent."""
+        update_event = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Updated system prompt"),
+            tools=[],
+            reason="tools_changed",
+        )
+
+        events = cast(list[LLMConvertibleEvent], [update_event])
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        assert len(messages) == 1
+        assert messages[0].role == "system"
+        assert len(messages[0].content) == 1
+        assert isinstance(messages[0].content[0], TextContent)
+        assert messages[0].content[0].text == "Updated system prompt"
+
+    def test_latest_system_prompt_wins_with_update(self):
+        """Test latest SystemPromptUpdateEvent overrides earlier SystemPromptEvent."""
+        # Original system prompt
+        original_event = SystemPromptEvent(
+            source="agent",
+            system_prompt=TextContent(text="Original system prompt"),
+            tools=[],
+        )
+
+        # User message
+        user_message = MessageEvent(
+            source="user",
+            llm_message=Message(role="user", content=[TextContent(text="Hello")]),
+        )
+
+        # Updated system prompt (after restore with changed tools)
+        update_event = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Updated system prompt with new tools"),
+            tools=[],
+            reason="tools_changed",
+        )
+
+        events = cast(
+            list[LLMConvertibleEvent], [original_event, user_message, update_event]
+        )
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        # Should have 2 messages: updated system + user (original system is skipped)
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert messages[0].content[0].text == "Updated system prompt with new tools"  # type: ignore
+        assert messages[1].role == "user"
+
+    def test_latest_system_prompt_wins_multiple_updates(self):
+        """Test that only the latest of multiple updates is used."""
+        original = SystemPromptEvent(
+            source="agent",
+            system_prompt=TextContent(text="Original"),
+            tools=[],
+        )
+
+        update1 = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Update 1"),
+            tools=[],
+            reason="tools_changed",
+        )
+
+        update2 = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Update 2 - final"),
+            tools=[],
+            reason="system_prompt_changed",
+        )
+
+        events = cast(list[LLMConvertibleEvent], [original, update1, update2])
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        # Should have only 1 message: the final update
+        assert len(messages) == 1
+        assert messages[0].role == "system"
+        assert messages[0].content[0].text == "Update 2 - final"  # type: ignore
+
+    def test_system_prompt_update_with_full_conversation(self):
+        """Test SystemPromptUpdateEvent in a realistic conversation flow."""
+        # Phase A: Initial conversation
+        original_system = SystemPromptEvent(
+            source="agent",
+            system_prompt=TextContent(text="Original system prompt"),
+            tools=[],
+        )
+
+        user_message1 = MessageEvent(
+            source="user",
+            llm_message=Message(role="user", content=[TextContent(text="Hello")]),
+        )
+
+        action1 = create_action_event(
+            thought_text="I understand",
+            tool_name="terminal",
+            tool_call_id="call_1",
+            llm_response_id="response_1",
+            action_args={"command": "ls"},
+        )
+
+        observation1 = ObservationEvent(
+            source="environment",
+            observation=EventsToMessagesMockObservation(result="file.txt"),
+            action_id="action_1",
+            tool_name="terminal",
+            tool_call_id="call_1",
+        )
+
+        # Phase B: Restore with new tools - emit SystemPromptUpdateEvent
+        system_update = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Updated prompt with new tools"),
+            tools=[],
+            reason="tools_changed",
+        )
+
+        user_message2 = MessageEvent(
+            source="user",
+            llm_message=Message(
+                role="user", content=[TextContent(text="Now with new tools")]
+            ),
+        )
+
+        events = cast(
+            list[LLMConvertibleEvent],
+            [
+                original_system,
+                user_message1,
+                action1,
+                observation1,
+                system_update,
+                user_message2,
+            ],
+        )
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        # Should have 5 messages:
+        # 1. Updated system prompt (original is skipped)
+        # 2. First user message
+        # 3. Assistant action
+        # 4. Tool observation
+        # 5. Second user message
+        assert len(messages) == 5
+
+        assert messages[0].role == "system"
+        assert messages[0].content[0].text == "Updated prompt with new tools"  # type: ignore
+
+        assert messages[1].role == "user"
+        assert messages[2].role == "assistant"
+        assert messages[3].role == "tool"
+        assert messages[4].role == "user"
+
+    def test_no_system_prompt_events(self):
+        """Test handling when there are no system prompt events."""
+        user_message = MessageEvent(
+            source="user",
+            llm_message=Message(role="user", content=[TextContent(text="Hello")]),
+        )
+
+        events = cast(list[LLMConvertibleEvent], [user_message])
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        assert len(messages) == 1
+        assert messages[0].role == "user"
+
+    def test_system_prompt_always_first(self):
+        """Test that latest system prompt is always placed first."""
+        # Even when the update event is in the middle of conversation,
+        # the system message should be placed first
+        original = SystemPromptEvent(
+            source="agent",
+            system_prompt=TextContent(text="Original"),
+            tools=[],
+        )
+
+        user_message = MessageEvent(
+            source="user",
+            llm_message=Message(role="user", content=[TextContent(text="Hello")]),
+        )
+
+        update = SystemPromptUpdateEvent(
+            source="agent",
+            system_prompt=TextContent(text="Updated"),
+            tools=[],
+            reason="tools_changed",
+        )
+
+        assistant_message = MessageEvent(
+            source="agent",
+            llm_message=Message(
+                role="assistant", content=[TextContent(text="Hi there")]
+            ),
+        )
+
+        events = cast(
+            list[LLMConvertibleEvent],
+            [original, user_message, update, assistant_message],
+        )
+        messages = LLMConvertibleEvent.events_to_messages(events)
+
+        # Should have 3 messages: system first, then user, assistant
+        # Original system is skipped, update is placed first
+        assert len(messages) == 3
+        assert messages[0].role == "system"
+        assert messages[0].content[0].text == "Updated"  # type: ignore
+        assert messages[1].role == "user"
+        assert messages[2].role == "assistant"
