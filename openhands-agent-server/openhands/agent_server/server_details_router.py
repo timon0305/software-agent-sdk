@@ -24,6 +24,18 @@ def update_last_execution_time():
     _last_event_time = time.time()
 
 
+@server_details_router.post("/reset_idle_time")
+async def reset_idle_time():
+    """Reset the idle time counter.
+
+    This endpoint is called when a warm runtime is claimed to prevent
+    the runtime from being immediately paused due to inherited idle time
+    from the warm pool.
+    """
+    update_last_execution_time()
+    return {"status": "ok"}
+
+
 @server_details_router.get("/alive")
 async def alive():
     return {"status": "ok"}
