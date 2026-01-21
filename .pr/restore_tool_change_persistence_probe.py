@@ -81,6 +81,14 @@ from openhands.tools.file_editor import FileEditorTool
 from openhands.tools.terminal import TerminalTool
 
 
+# A minimal Agent subclass with a short system prompt for readable test output.
+# Only the prompt text is shortened; tools are unchanged.
+class ProbeAgent(Agent):
+    @property
+    def system_message(self) -> str:
+        return "You are a helpful assistant for this probe test."
+
+
 @dataclass(frozen=True)
 class Snapshot:
     label: str
@@ -409,7 +417,7 @@ def main() -> None:
         log_completions=True,
         log_completions_folder=str(telemetry_a),
     )
-    agent_a = Agent(
+    agent_a = ProbeAgent(
         llm=llm_a,
         tools=[Tool(name=FileEditorTool.name)],
     )
@@ -459,7 +467,7 @@ def main() -> None:
         log_completions=True,
         log_completions_folder=str(telemetry_b),
     )
-    agent_b = Agent(
+    agent_b = ProbeAgent(
         llm=llm_b,
         tools=[Tool(name=FileEditorTool.name), Tool(name=TerminalTool.name)],
     )
@@ -508,7 +516,7 @@ def main() -> None:
         log_completions=True,
         log_completions_folder=str(telemetry_c),
     )
-    agent_c = Agent(
+    agent_c = ProbeAgent(
         llm=llm_c,
         tools=[Tool(name=FileEditorTool.name), Tool(name=TerminalTool.name)],
     )
