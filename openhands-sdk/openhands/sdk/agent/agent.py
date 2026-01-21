@@ -106,10 +106,11 @@ class Agent(AgentBase):
         # TODO(openhands): we should add test to test this init_state will actually
         # modify state in-place
 
-        llm_convertible_messages = [
-            event for event in state.events if isinstance(event, LLMConvertibleEvent)
-        ]
-        if len(llm_convertible_messages) == 0:
+        # Check if SystemPromptEvent already exists to avoid duplicates
+        has_system_prompt = any(
+            isinstance(event, SystemPromptEvent) for event in state.events
+        )
+        if not has_system_prompt:
             # Prepare system message
             event = SystemPromptEvent(
                 source="agent",

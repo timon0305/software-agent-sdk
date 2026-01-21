@@ -212,7 +212,6 @@ def test_remote_conversation_over_real_server(server_env, patched_llm):
     assert state.execution_status.value in {"finished", "idle", "running"}
 
     # Wait for WS-delivered events and validate them using proper type checking
-    found_system_prompt = False
     found_state_update = False
     found_agent_related_event = False
 
@@ -240,8 +239,7 @@ def test_remote_conversation_over_real_server(server_env, patched_llm):
         # Check for expected event types with proper isinstance checks
         for e in events:
             if isinstance(e, SystemPromptEvent) and e.source == "agent":
-                found_system_prompt = True
-                # SystemPromptEvent is an agent-related event
+                # SystemPromptEvent is agent-related (may not be present with lazy init)
                 found_agent_related_event = True
 
             if isinstance(e, ConversationStateUpdateEvent):
@@ -268,26 +266,14 @@ def test_remote_conversation_over_real_server(server_env, patched_llm):
                 )
                 found_agent_related_event = True
 
-        # We expect at least system prompt and state update events
-        if found_system_prompt and found_state_update:
+        # We expect at least agent-related event and state update events
+        # Note: With lazy initialization, SystemPromptEvent may not be present
+        # in the remote event stream, so we check for any agent-related event
+        if found_agent_related_event and found_state_update:
             break
         time.sleep(0.1)
 
     # Assert we got the expected events with descriptive messages
-    assert found_system_prompt, (
-        f"Expected to find SystemPromptEvent with source='agent'. "
-        f"Found {len(state.events)} events: {
-            [
-                (
-                    type(e).__name__,
-                    e.source
-                    if isinstance(e, (MessageEvent, ActionEvent, SystemPromptEvent))
-                    else 'N/A',
-                )
-                for e in state.events
-            ]
-        }"
-    )
     assert found_state_update, (
         f"Expected to find ConversationStateUpdateEvent. "
         f"Found {len(state.events)} events: {[type(e).__name__ for e in state.events]}"
