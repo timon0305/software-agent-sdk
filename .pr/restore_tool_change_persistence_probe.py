@@ -1,49 +1,53 @@
 """
 Probe: conversation restore behavior when tools change.
 
-This is a temporary investigation script meant to answer, with evidence:
+This script demonstrates (with evidence) the behavior of SystemPromptUpdateEvent
+when restoring conversations with different tool configurations.
 
+Questions answered
+------------------
 1) What gets persisted to disk when a conversation is created and run?
    - `base_state.json` (ConversationState snapshot, excluding events)
    - `events/event-*.json` (append-only EventLog)
 
-2) What changes on disk when a user restores a conversation with a *different*
-   runtime Agent configuration (specifically: adding a tool)?
-   - Does `base_state.json` update to reflect the runtime agent's tool *specs*?
-   - Do we create or overwrite a `SystemPromptEvent` on restore?
+2) What changes on disk when restoring with a *different* tool configuration?
+   - `base_state.json` is updated with the new agent tool specs
+   - A `SystemPromptUpdateEvent` is appended (not overwriting the original)
 
 3) What is actually sent to the LLM after restore?
-   - Even if the persisted `SystemPromptEvent` isn't rewritten, do we send the
-     *new* tool definitions to the LLM on the next call?
+   - The LLM receives the *updated* tool definitions from the latest
+     SystemPromptEvent or SystemPromptUpdateEvent
+
+4) What happens on subsequent restores with unchanged tools?
+   - No duplicate SystemPromptUpdateEvent is emitted
+   - The LLM still sees the correct (updated) tools
 
 How this script works
 ---------------------
-We run two phases against the same persisted conversation ID:
+We run three phases against the same persisted conversation ID:
 
 Phase A (initial conversation)
-  - Create a conversation with an Agent that has exactly one non-builtin tool:
-    `file_editor` (FileEditorTool). Persistence is enabled.
-  - Ensure `SystemPromptEvent` exists (created during `Agent.init_state()`).
-    For readability in the report, we only display the first paragraph of the
-    system prompt text, but we validate that the full prompt is persisted.
-  - Send a user message and run the agent once.
+  - Create a conversation with `file_editor` as the only non-builtin tool
+  - A `SystemPromptEvent` is persisted during `Agent.init_state()`
+  - Send a user message and run the agent once
 
 Phase B (restore with an additional tool)
-  - Restore the *same* conversation (same `conversation_id`, same persistence
-    directory) but provide a runtime Agent configured with:
-      - `file_editor` (same as Phase A)
-      - `terminal` (TerminalTool) ADDED
-  - Send a user message and run the agent once.
+  - Restore the same conversation but with `terminal` added to tools
+  - A `SystemPromptUpdateEvent` is emitted with reason="tools_changed"
+  - Send a user message and run the agent once
 
-LLM + telemetry capture
------------------------
-This script enables completion telemetry logging via `LLM(log_completions=True)`.
-To keep this script runnable without API keys and without network calls, it
-patches `LLM._transport_call` with a deterministic stub response that always
-invokes the builtin `finish` tool. This guarantees:
-  - The SDK still builds the request payload (messages + tools)
-  - The telemetry logger writes the request content to disk
-  - The run terminates quickly (FinishTool sets execution_status=FINISHED)
+Phase C (restore with unchanged tools)
+  - Restore again with the same tools as Phase B (file_editor + terminal)
+  - No new SystemPromptUpdateEvent should be emitted
+  - Verify the LLM still sees the correct tools
+
+LLM stubbing
+------------
+To run without API keys or network calls, we patch `LLM._transport_call` with a
+stub that always invokes the `finish` tool. This guarantees:
+  - The SDK builds the full request payload (messages + tools)
+  - Telemetry logs capture what would be sent to the LLM
+  - Each run terminates quickly
 
 Run
 ---
