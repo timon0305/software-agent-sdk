@@ -394,9 +394,7 @@ def test_conversation_state_missing_base_state():
 
         # Should create new state, not load the orphaned event file
         assert conversation._state.id is not None
-        assert (
-            len(conversation._state.events) >= 1
-        )  # At least system prompt from Agent.init_state
+        # Note: With lazy initialization, system prompt not added until first use
 
 
 def test_conversation_state_exclude_from_base_state():

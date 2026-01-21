@@ -142,6 +142,7 @@ class LocalConversation(BaseConversation):
         self._resolved_plugins = None
         self._plugins_loaded = False
         self._pending_hook_config = hook_config  # Will be combined with plugin hooks
+        self._agent_ready = False  # Agent initialized lazily after plugins loaded
 
         self.agent = agent
         if isinstance(workspace, (str, Path)):
@@ -229,14 +230,9 @@ class LocalConversation(BaseConversation):
         else:
             self._stuck_detector = None
 
-        with self._state:
-            self.agent.init_state(self._state, on_event=self._on_event)
-
-        # Register existing llms in agent
+        # Agent initialization is deferred to _ensure_agent_ready() for lazy loading
+        # This ensures plugins are loaded before agent initialization
         self.llm_registry = LLMRegistry()
-        self.llm_registry.subscribe(self._state.stats.register_llm)
-        for llm in list(self.agent.get_all_llms()):
-            self.llm_registry.add(llm)
 
         # Initialize secrets if provided
         if secrets:
@@ -346,10 +342,6 @@ class LocalConversation(BaseConversation):
                 }
             )
 
-            # Reset initialization flag to allow re-initialization with plugin config
-            # This ensures MCP tools from plugins are created properly
-            self.agent._initialized = False
-
             # Also update the agent in _state so API responses reflect loaded plugins
             with self._state:
                 self._state.agent = self.agent
@@ -380,14 +372,39 @@ class LocalConversation(BaseConversation):
             self._hook_processor.set_conversation_state(self._state)
             self._hook_processor.run_session_start()
 
-        # Re-initialize agent after loading plugins to ensure MCP tools and skills
-        # from plugins are properly initialized. Use hook-wrapped callback if hooks
-        # are present, otherwise use base callback.
-        if self._plugin_specs:
-            with self._state:
-                self.agent.init_state(self._state, on_event=self._on_event)
-
         self._plugins_loaded = True
+
+    def _ensure_agent_ready(self) -> None:
+        """Ensure agent is fully initialized with plugins loaded.
+
+        This method combines plugin loading and agent initialization to ensure
+        the agent is initialized exactly once with complete configuration.
+
+        Called lazily on first send_message() or run() to:
+        1. Load plugins (if specified)
+        2. Initialize agent with complete plugin config and hooks
+        3. Register LLMs in the registry
+
+        This preserves the design principle that constructors should not perform
+        I/O or error-prone operations, while eliminating double initialization.
+        """
+        if self._agent_ready:
+            return
+
+        # Load plugins first (merges skills, MCP config, hooks)
+        self._ensure_plugins_loaded()
+
+        # Initialize agent with complete configuration
+        # Use hook-wrapped callback if hooks were configured, otherwise base callback
+        with self._state:
+            self.agent.init_state(self._state, on_event=self._on_event)
+
+        # Register LLMs in the registry
+        self.llm_registry.subscribe(self._state.stats.register_llm)
+        for llm in list(self.agent.get_all_llms()):
+            self.llm_registry.add(llm)
+
+        self._agent_ready = True
 
     @observe(name="conversation.send_message")
     def send_message(self, message: str | Message, sender: str | None = None) -> None:
@@ -401,8 +418,8 @@ class LocalConversation(BaseConversation):
                    one agent delegates to another, the sender can be set to
                    identify which agent is sending the message.
         """
-        # Ensure plugins are loaded before processing message
-        self._ensure_plugins_loaded()
+        # Ensure agent is fully initialized (loads plugins and initializes agent)
+        self._ensure_agent_ready()
 
         # Convert string to Message if needed
         if isinstance(message, str):
@@ -462,8 +479,8 @@ class LocalConversation(BaseConversation):
 
         Can be paused between steps
         """
-        # Ensure plugins are loaded before running
-        self._ensure_plugins_loaded()
+        # Ensure agent is fully initialized (loads plugins and initializes agent)
+        self._ensure_agent_ready()
 
         with self._state:
             if self._state.execution_status in [
@@ -711,6 +728,9 @@ class LocalConversation(BaseConversation):
         Returns:
             A string response from the agent
         """
+        # Ensure agent is initialized (needs tools_map)
+        self._ensure_agent_ready()
+
         # Import here to avoid circular imports
         from openhands.sdk.agent.utils import make_llm_completion, prepare_llm_messages
 
