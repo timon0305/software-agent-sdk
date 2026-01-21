@@ -37,6 +37,7 @@ plugins = [
 api_key = os.getenv("LLM_API_KEY")
 if not api_key:
     print("Set LLM_API_KEY to run this example")
+    print("EXAMPLE_COST: 0")
     sys.exit(0)
 
 # Configure LLM and Agent
@@ -75,3 +76,4 @@ with tempfile.TemporaryDirectory() as tmpdir:
     conversation.run()
 
     print(f"Cost: ${llm.metrics.accumulated_cost:.4f}")
+    print(f"EXAMPLE_COST: {llm.metrics.accumulated_cost:.4f}")
