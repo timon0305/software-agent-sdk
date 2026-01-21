@@ -61,8 +61,10 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import io
 import json
 import logging
+import sys
 import time
 import uuid
 import warnings
@@ -387,13 +389,18 @@ def _print_snapshot_md(s: Snapshot) -> None:
 
 
 def main() -> None:
-    # Keep stdout as Markdown (suppress SDK/tool info logs and noisy warnings).
+    # Suppress SDK/tool info logs and noisy warnings.
     logging.disable(logging.CRITICAL)
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
     repo_root = Path(__file__).resolve().parents[1]
     artifacts_root = repo_root / ".pr" / "artifacts" / _now_slug()
     artifacts_root.mkdir(parents=True, exist_ok=True)
+
+    # Capture output to write to README.md
+    output_buffer = io.StringIO()
+    original_stdout = sys.stdout
+    sys.stdout = output_buffer
 
     workspace_dir = artifacts_root / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -657,6 +664,16 @@ def main() -> None:
         print("- ❌ LLM does NOT see `terminal` tool in Phase C")
 
     print()
+
+    # Write output to README.md and restore stdout
+    sys.stdout = original_stdout
+    readme_content = output_buffer.getvalue()
+    readme_path = artifacts_root / "README.md"
+    readme_path.write_text(readme_content, encoding="utf-8")
+
+    # Also print to console
+    print(readme_content)
+    print(f"Report written to: {readme_path}")
 
 
 if __name__ == "__main__":
