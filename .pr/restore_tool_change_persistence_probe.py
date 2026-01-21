@@ -499,6 +499,55 @@ def main() -> None:
         telemetry_dir=telemetry_b,
     )
 
+    # ---- Phase C: Another restore with SAME tools (no change) ----
+    telemetry_c = artifacts_root / "telemetry_phase_c"
+    llm_c = LLM(
+        model="gpt-4o-mini",
+        api_key=SecretStr("dummy"),
+        usage_id="probe",
+        log_completions=True,
+        log_completions_folder=str(telemetry_c),
+    )
+    agent_c = Agent(
+        llm=llm_c,
+        tools=[Tool(name=FileEditorTool.name), Tool(name=TerminalTool.name)],
+    )
+    convo_c = Conversation(
+        agent=agent_c,
+        workspace=str(workspace_dir),
+        persistence_dir=str(persistence_base_dir),
+        conversation_id=conversation_id,
+        visualizer=None,
+    )
+
+    snap_c0 = _snapshot(
+        "Phase C (after restore with same tools, before user message)",
+        root=artifacts_root,
+        persistence_dir=persistence_dir,
+        telemetry_dir=telemetry_c,
+    )
+
+    convo_c.send_message("What tools do you have available?")
+    snap_c1 = _snapshot(
+        "Phase C (after send_message, before run)",
+        root=artifacts_root,
+        persistence_dir=persistence_dir,
+        telemetry_dir=telemetry_c,
+    )
+
+    with (
+        patch.object(LLM, "uses_responses_api", return_value=False),
+        patch.object(LLM, "_transport_call", new=_fake_transport_call),
+    ):
+        convo_c.run()
+
+    snap_c2 = _snapshot(
+        "Phase C (after run)",
+        root=artifacts_root,
+        persistence_dir=persistence_dir,
+        telemetry_dir=telemetry_c,
+    )
+
     # ---- Markdown report ----
     print("## Snapshots")
     print()
@@ -508,6 +557,9 @@ def main() -> None:
     _print_snapshot_md(snap_b0)
     _print_snapshot_md(snap_b1)
     _print_snapshot_md(snap_b2)
+    _print_snapshot_md(snap_c0)
+    _print_snapshot_md(snap_c1)
+    _print_snapshot_md(snap_c2)
 
     print("## What changed on disk?")
     print()
@@ -536,8 +588,11 @@ def main() -> None:
     tool_specs_b = _tool_spec_names_from_base_state(snap_b2.base_state)
     persisted_system_tools = snap_b2.system_prompt_tool_names
     telemetry_tools_b = _tool_names_from_telemetry(snap_b2.last_telemetry_payload)
+    telemetry_tools_c = _tool_names_from_telemetry(snap_c2.last_telemetry_payload)
 
     print("## Key checks")
+    print()
+    print("### Phase A -> B (tool added)")
     print()
     print(
         "- `base_state.json` agent.tools updated on restore: "
@@ -548,7 +603,7 @@ def main() -> None:
         f"`{snap_a2.system_prompt_tool_names}` == `{persisted_system_tools}`"
     )
 
-    # NEW: Check for SystemPromptUpdateEvent
+    # Check for SystemPromptUpdateEvent in Phase B
     if snap_b2.system_prompt_update_event is not None:
         print(
             "- ✅ `SystemPromptUpdateEvent` was persisted on restore with reason: "
@@ -561,10 +616,34 @@ def main() -> None:
     else:
         print("- ❌ No `SystemPromptUpdateEvent` found (expected one)")
 
-    print(
-        "- Tools sent to LLM after restore (per telemetry) include added tool: "
-        f"`{telemetry_tools_b}`"
+    print(f"- Tools sent to LLM after restore (per telemetry): `{telemetry_tools_b}`")
+
+    print()
+    print("### Phase C (second restore, same tools)")
+    print()
+
+    # Count SystemPromptUpdateEvents in Phase C
+    update_count_c = len(
+        [e for e in snap_c2.event_types if e == "SystemPromptUpdateEvent"]
     )
+    print(f"- Number of `SystemPromptUpdateEvent` in event log: `{update_count_c}`")
+
+    if update_count_c == 1:
+        print(
+            "- ✅ No new `SystemPromptUpdateEvent` emitted "
+            "(tools unchanged, reusing existing update)"
+        )
+    else:
+        print(f"- ⚠️ Expected 1 `SystemPromptUpdateEvent`, found {update_count_c}")
+
+    print(f"- Tools sent to LLM in Phase C (per telemetry): `{telemetry_tools_c}`")
+
+    # Verify the telemetry shows the correct tools
+    if "terminal" in telemetry_tools_c:
+        print("- ✅ LLM sees `terminal` tool in Phase C")
+    else:
+        print("- ❌ LLM does NOT see `terminal` tool in Phase C")
+
     print()
 
 
