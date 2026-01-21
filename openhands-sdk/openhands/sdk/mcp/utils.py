@@ -1,7 +1,6 @@
 """Utility functions for MCP integration."""
 
 import logging
-from collections.abc import Iterator
 
 import mcp.types
 from fastmcp.client.logging import LogMessage
@@ -33,132 +32,58 @@ async def log_handler(message: LogMessage):
     logger.log(level, msg, extra=extra)
 
 
-async def _list_tools_and_keep_connected(client: MCPClient) -> list[ToolDefinition]:
-    """List tools from MCP client and keep connection open.
-
-    Unlike the old approach that closed the connection after listing,
-    this keeps the connection open so subsequent tool calls can reuse it.
-    The connection should be closed via client.sync_close() when done.
-    """
-    tools: list[ToolDefinition] = []
-
-    # Establish connection (will be closed via sync_close() when done)
-    await client.connect()
-
-    if not client.is_connected():
-        raise RuntimeError("MCP client failed to connect")
-
+async def _list_mcp_tools(client: MCPClient) -> list[ToolDefinition]:
+    """List tools from a connected MCP client."""
     mcp_type_tools: list[mcp.types.Tool] = await client.list_tools()
+    tools: list[ToolDefinition] = []
     for mcp_tool in mcp_type_tools:
         tool_sequence = MCPToolDefinition.create(mcp_tool=mcp_tool, mcp_client=client)
         tools.extend(tool_sequence)
-
-    # Connection stays open for subsequent tool calls.
-    # It will be closed when client.sync_close() is called.
     return tools
 
 
-class MCPToolset:
-    """A collection of MCP tools with explicit lifecycle management.
+async def _create_stateful_toolset(client: MCPClient) -> list[ToolDefinition]:
+    """Connect to MCP server and create tools sharing the connection.
 
-    This class owns the MCP client connection and provides clear ownership
-    semantics. Use it as a context manager for automatic cleanup:
-
-        with create_mcp_tools(config) as toolset:
-            for tool in toolset.tools:
-                # use tool
-            # Connection automatically closed on exit
-
-    Or manage lifecycle manually:
-
-        toolset = create_mcp_tools(config)
-        try:
-            for tool in toolset.tools:
-                # use tool
-        finally:
-            toolset.close()
+    Establishes a persistent connection that remains open for the lifetime
+    of the tools, allowing them to maintain session state across calls.
     """
-
-    def __init__(self, tools: list[MCPToolDefinition], client: MCPClient):
-        self._tools = tools
-        self._client = client
-
-    @property
-    def tools(self) -> list[MCPToolDefinition]:
-        """The list of MCP tools."""
-        return self._tools
-
-    @property
-    def client(self) -> MCPClient:
-        """The underlying MCP client (for advanced use cases)."""
-        return self._client
-
-    def close(self) -> None:
-        """Close the MCP client connection.
-
-        This releases all resources associated with the MCP server connection.
-        After calling close(), the tools in this toolset can no longer be used.
-        """
-        self._client.sync_close()
-
-    def __enter__(self) -> "MCPToolset":
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        self.close()
-
-    def __iter__(self) -> Iterator[MCPToolDefinition]:
-        """Allow iterating directly over the toolset."""
-        return iter(self._tools)
-
-    def __len__(self) -> int:
-        """Return the number of tools."""
-        return len(self._tools)
-
-    def __getitem__(self, index: int) -> MCPToolDefinition:
-        """Allow indexing into the toolset."""
-        return self._tools[index]
+    await client.connect()
+    if not client.is_connected():
+        raise RuntimeError("MCP client failed to connect")
+    return await _list_mcp_tools(client)
 
 
 def create_mcp_tools(
     config: dict | MCPConfig,
     timeout: float = 30.0,
-) -> MCPToolset:
-    """Create MCP tools from MCP configuration.
+) -> list[MCPToolDefinition]:
+    """Create MCP tools with a persistent connection for session state.
 
-    Returns an MCPToolset that owns the client connection. Use it as a
-    context manager for automatic cleanup, or call close() when done:
+    Returns tools that share a single MCP client connection, enabling stateful
+    operations across multiple tool calls (e.g., browser sessions, auth tokens).
 
-        # Context manager (recommended):
-        with create_mcp_tools(config) as toolset:
-            for tool in toolset.tools:
-                # use tool
-
-        # Manual cleanup:
-        toolset = create_mcp_tools(config)
-        try:
-            for tool in toolset.tools:
-                # use tool
-        finally:
-            toolset.close()
+    The connection is cleaned up when:
+    - Conversation.close() is called (automatically closes all tool executors)
+    - executor.close() is called on any tool (closes the shared client)
+    - The client is garbage collected
 
     Args:
         config: MCP configuration dict or MCPConfig object
         timeout: Timeout for connecting and listing tools (default 30s)
 
     Returns:
-        MCPToolset containing the tools and owning the client connection
+        List of MCP tools sharing a persistent connection
     """
     if isinstance(config, dict):
         config = MCPConfig.model_validate(config)
     client = MCPClient(config, log_handler=log_handler)
 
     try:
-        tools = client.call_async_from_sync(
-            _list_tools_and_keep_connected, timeout=timeout, client=client
+        tools: list[MCPToolDefinition] = client.call_async_from_sync(
+            _create_stateful_toolset, timeout=timeout, client=client
         )
     except TimeoutError as e:
-        # Clean up on timeout
         client.sync_close()
         server_names = (
             list(config.mcpServers.keys()) if config.mcpServers else ["unknown"]
@@ -175,7 +100,6 @@ def create_mcp_tools(
             error_msg, timeout=timeout, config=config.model_dump()
         ) from e
     except Exception:
-        # Clean up on any error (don't mask the original exception)
         try:
             client.sync_close()
         except Exception as close_exc:
@@ -185,4 +109,4 @@ def create_mcp_tools(
         raise
 
     logger.info(f"Created {len(tools)} MCP tools: {[t.name for t in tools]}")
-    return MCPToolset(tools=tools, client=client)
+    return tools

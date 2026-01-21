@@ -163,9 +163,10 @@ class TestStatefulMCPSessionPersistence:
             }
         }
 
-        with create_mcp_tools(config, timeout=10.0) as toolset:
-            increment_tool = next(t for t in toolset if t.name == "increment_counter")
-            get_tool = next(t for t in toolset if t.name == "get_counter")
+        tools = create_mcp_tools(config, timeout=10.0)
+        try:
+            increment_tool = next(t for t in tools if t.name == "increment_counter")
+            get_tool = next(t for t in tools if t.name == "get_counter")
 
             executor = increment_tool.executor
             assert isinstance(executor, MCPToolExecutor)
@@ -182,6 +183,9 @@ class TestStatefulMCPSessionPersistence:
             action = get_tool.action_from_arguments({})
             result = get_executor(action)
             assert "Counter value is 3" in result.text
+        finally:
+            assert tools[0].executor is not None
+            tools[0].executor.close()
 
     def test_auth_token_persists_across_tools(self, stateful_server):
         """Test that authentication set in one call is available in subsequent calls.
@@ -202,9 +206,10 @@ class TestStatefulMCPSessionPersistence:
             }
         }
 
-        with create_mcp_tools(config, timeout=10.0) as toolset:
-            set_auth_tool = next(t for t in toolset if t.name == "set_auth_token")
-            get_auth_tool = next(t for t in toolset if t.name == "get_auth_token")
+        tools = create_mcp_tools(config, timeout=10.0)
+        try:
+            set_auth_tool = next(t for t in tools if t.name == "set_auth_token")
+            get_auth_tool = next(t for t in tools if t.name == "get_auth_token")
 
             set_executor = set_auth_tool.executor
             get_executor = get_auth_tool.executor
@@ -225,6 +230,9 @@ class TestStatefulMCPSessionPersistence:
             # THE KEY ASSERTION: Token must still be there
             assert "secret-123" in result.text
             assert "ERROR" not in result.text  # No session reset error
+        finally:
+            assert tools[0].executor is not None
+            tools[0].executor.close()
 
     def test_multiple_operations_same_session(self, stateful_server):
         """Test a realistic workflow: authenticate, then perform multiple operations."""
@@ -240,12 +248,13 @@ class TestStatefulMCPSessionPersistence:
             }
         }
 
-        with create_mcp_tools(config, timeout=10.0) as toolset:
+        tools = create_mcp_tools(config, timeout=10.0)
+        try:
             # Get all tools
-            set_auth = next(t for t in toolset if t.name == "set_auth_token")
-            get_auth = next(t for t in toolset if t.name == "get_auth_token")
-            increment = next(t for t in toolset if t.name == "increment_counter")
-            get_counter = next(t for t in toolset if t.name == "get_counter")
+            set_auth = next(t for t in tools if t.name == "set_auth_token")
+            get_auth = next(t for t in tools if t.name == "get_auth_token")
+            increment = next(t for t in tools if t.name == "increment_counter")
+            get_counter = next(t for t in tools if t.name == "get_counter")
 
             # Verify executors exist
             assert set_auth.executor is not None
@@ -273,3 +282,6 @@ class TestStatefulMCPSessionPersistence:
             result = get_auth.executor(action)
             assert "my-api-key" in result.text  # Auth still there!
             assert "ERROR" not in result.text
+        finally:
+            assert tools[0].executor is not None
+            tools[0].executor.close()

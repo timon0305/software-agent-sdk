@@ -8,7 +8,6 @@ from openhands.sdk.mcp.tool import (
     MCPToolExecutor,
 )
 from openhands.sdk.mcp.utils import (
-    MCPToolset,
     create_mcp_tools,
 )
 
@@ -19,7 +18,6 @@ __all__ = [
     "MCPToolAction",
     "MCPToolObservation",
     "MCPToolExecutor",
-    "MCPToolset",
     "create_mcp_tools",
     "MCPError",
     "MCPTimeoutError",

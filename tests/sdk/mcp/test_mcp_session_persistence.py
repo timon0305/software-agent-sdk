@@ -97,11 +97,12 @@ class TestSessionPersistence:
             }
         }
 
-        with create_mcp_tools(config, timeout=10.0) as toolset:
-            assert len(toolset) == 2
+        tools = create_mcp_tools(config, timeout=10.0)
+        try:
+            assert len(tools) == 2
 
-            echo_tool = next(t for t in toolset if t.name == "echo")
-            add_tool = next(t for t in toolset if t.name == "add_numbers")
+            echo_tool = next(t for t in tools if t.name == "echo")
+            add_tool = next(t for t in tools if t.name == "add_numbers")
 
             # Verify they share the same client
             echo_executor = echo_tool.executor
@@ -120,6 +121,9 @@ class TestSessionPersistence:
             action = add_tool.action_from_arguments({"a": 5, "b": 3})
             result = add_executor(action)
             assert "8" in result.text
+        finally:
+            assert tools[0].executor is not None
+            tools[0].executor.close()
 
     def test_close_releases_connection(self, live_server: int):
         """Test that close() properly releases the connection."""
@@ -132,8 +136,9 @@ class TestSessionPersistence:
             }
         }
 
-        with create_mcp_tools(config, timeout=10.0) as toolset:
-            tool = next(t for t in toolset if t.name == "echo")
+        tools = create_mcp_tools(config, timeout=10.0)
+        try:
+            tool = next(t for t in tools if t.name == "echo")
             executor = tool.executor
             assert isinstance(executor, MCPToolExecutor)
 
@@ -141,5 +146,7 @@ class TestSessionPersistence:
             action = tool.action_from_arguments({"message": "test"})
             result = executor(action)
             assert "test" in result.text
-
-        # Connection is automatically closed when exiting context manager
+        finally:
+            # Clean up - close is idempotent
+            assert tools[0].executor is not None
+            tools[0].executor.close()
