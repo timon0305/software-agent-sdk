@@ -53,6 +53,7 @@ agent = Agent(
 )
 
 # Create conversation with plugins - skills, MCP config, and hooks are merged
+# Note: Plugins are loaded lazily on first send_message() or run() call
 with tempfile.TemporaryDirectory() as tmpdir:
     conversation = Conversation(
         agent=agent,
@@ -60,7 +61,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
         plugins=plugins,
     )
 
-    # Verify skills were loaded from the plugin
+    # Test: The "lint" keyword triggers the python-linting skill
+    # This first send_message() call triggers lazy plugin loading
+    conversation.send_message("How do I lint Python code? Brief answer please.")
+
+    # Verify skills were loaded from the plugin (after lazy loading)
     skills = (
         conversation.agent.agent_context.skills
         if conversation.agent.agent_context
@@ -68,8 +73,6 @@ with tempfile.TemporaryDirectory() as tmpdir:
     )
     print(f"Loaded {len(skills)} skill(s) from plugins")
 
-    # Test: The "lint" keyword triggers the python-linting skill
-    conversation.send_message("How do I lint Python code? Brief answer please.")
     conversation.run()
 
     print(f"Cost: ${llm.metrics.accumulated_cost:.4f}")
