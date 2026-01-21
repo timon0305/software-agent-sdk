@@ -14,6 +14,7 @@ from openhands.sdk.event.llm_convertible import (
     ObservationEvent,
     SystemPromptEvent,
     SystemPromptUpdateEvent,
+    SystemPromptUpdateReason,
 )
 from openhands.sdk.llm import (
     ImageContent,
@@ -465,7 +466,7 @@ class TestSystemPromptUpdateEvent:
             source="agent",
             system_prompt=TextContent(text="Updated system prompt"),
             tools=[],
-            reason="tools_changed",
+            reason=SystemPromptUpdateReason.TOOLS_CHANGED,
         )
 
         events = cast(list[LLMConvertibleEvent], [update_event])
@@ -497,7 +498,7 @@ class TestSystemPromptUpdateEvent:
             source="agent",
             system_prompt=TextContent(text="Updated system prompt with new tools"),
             tools=[],
-            reason="tools_changed",
+            reason=SystemPromptUpdateReason.TOOLS_CHANGED,
         )
 
         events = cast(
@@ -523,14 +524,14 @@ class TestSystemPromptUpdateEvent:
             source="agent",
             system_prompt=TextContent(text="Update 1"),
             tools=[],
-            reason="tools_changed",
+            reason=SystemPromptUpdateReason.TOOLS_CHANGED,
         )
 
         update2 = SystemPromptUpdateEvent(
             source="agent",
             system_prompt=TextContent(text="Update 2 - final"),
             tools=[],
-            reason="system_prompt_changed",
+            reason=SystemPromptUpdateReason.SYSTEM_PROMPT_CHANGED,
         )
 
         events = cast(list[LLMConvertibleEvent], [original, update1, update2])
@@ -576,7 +577,7 @@ class TestSystemPromptUpdateEvent:
             source="agent",
             system_prompt=TextContent(text="Updated prompt with new tools"),
             tools=[],
-            reason="tools_changed",
+            reason=SystemPromptUpdateReason.TOOLS_CHANGED,
         )
 
         user_message2 = MessageEvent(
@@ -647,7 +648,7 @@ class TestSystemPromptUpdateEvent:
             source="agent",
             system_prompt=TextContent(text="Updated"),
             tools=[],
-            reason="tools_changed",
+            reason=SystemPromptUpdateReason.TOOLS_CHANGED,
         )
 
         assistant_message = MessageEvent(

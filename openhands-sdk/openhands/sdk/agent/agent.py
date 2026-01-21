@@ -26,6 +26,7 @@ from openhands.sdk.event import (
     ObservationEvent,
     SystemPromptEvent,
     SystemPromptUpdateEvent,
+    SystemPromptUpdateReason,
     TokenEvent,
     UserRejectObservation,
 )
@@ -168,11 +169,11 @@ class Agent(AgentBase):
 
         # Determine reason for the update
         if tools_changed and prompt_changed:
-            reason = "tools_and_system_prompt_changed"
+            reason = SystemPromptUpdateReason.TOOLS_AND_SYSTEM_PROMPT_CHANGED
         elif tools_changed:
-            reason = "tools_changed"
+            reason = SystemPromptUpdateReason.TOOLS_CHANGED
         else:
-            reason = "system_prompt_changed"
+            reason = SystemPromptUpdateReason.SYSTEM_PROMPT_CHANGED
 
         logger.info(
             f"Emitting SystemPromptUpdateEvent (reason={reason}): "

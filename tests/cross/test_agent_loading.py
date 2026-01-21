@@ -695,7 +695,9 @@ def test_conversation_restore_emits_system_prompt_update_when_tools_change():
 
         assert len(update_events) == 1, "Expected exactly one SystemPromptUpdateEvent"
         update_event = update_events[0]
-        assert update_event.reason == "tools_changed"
+        from openhands.sdk.event import SystemPromptUpdateReason
+
+        assert update_event.reason == SystemPromptUpdateReason.TOOLS_CHANGED
 
         # Verify the update event has both tools
         update_tool_names = {t.name for t in update_event.tools}

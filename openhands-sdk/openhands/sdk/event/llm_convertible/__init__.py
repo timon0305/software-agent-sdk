@@ -9,12 +9,14 @@ from openhands.sdk.event.llm_convertible.observation import (
 from openhands.sdk.event.llm_convertible.system import (
     SystemPromptEvent,
     SystemPromptUpdateEvent,
+    SystemPromptUpdateReason,
 )
 
 
 __all__ = [
     "SystemPromptEvent",
     "SystemPromptUpdateEvent",
+    "SystemPromptUpdateReason",
     "ActionEvent",
     "ObservationEvent",
     "ObservationBaseEvent",

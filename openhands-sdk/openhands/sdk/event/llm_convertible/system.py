@@ -1,4 +1,5 @@
 import json
+from enum import Enum
 
 from pydantic import Field
 from rich.text import Text
@@ -7,6 +8,14 @@ from openhands.sdk.event.base import N_CHAR_PREVIEW, LLMConvertibleEvent
 from openhands.sdk.event.types import SourceType
 from openhands.sdk.llm import Message, TextContent
 from openhands.sdk.tool import ToolDefinition
+
+
+class SystemPromptUpdateReason(str, Enum):
+    """Reason for a SystemPromptUpdateEvent."""
+
+    TOOLS_CHANGED = "tools_changed"
+    SYSTEM_PROMPT_CHANGED = "system_prompt_changed"
+    TOOLS_AND_SYSTEM_PROMPT_CHANGED = "tools_and_system_prompt_changed"
 
 
 class SystemPromptEvent(LLMConvertibleEvent):
@@ -81,12 +90,8 @@ class SystemPromptUpdateEvent(LLMConvertibleEvent):
     tools: list[ToolDefinition] = Field(
         ..., description="List of tools as ToolDefinition objects"
     )
-    reason: str = Field(
-        ...,
-        description=(
-            "Reason for the update: 'tools_changed', 'system_prompt_changed', "
-            "or 'tools_and_system_prompt_changed'"
-        ),
+    reason: SystemPromptUpdateReason = Field(
+        ..., description="Reason for the system prompt update"
     )
 
     @property
