@@ -59,7 +59,7 @@ def test_agent_initializes_tools_from_toolspec_locally(monkeypatch):
     llm = LLM(model="test-model", usage_id="test-llm")
     agent = Agent(llm=llm, tools=[Tool(name="upper")])
 
-    # Build a conversation; agent initialization is now lazy (deferred to first run/send_message)
+    # Build a conversation; agent init is lazy (deferred to first run/send_message)
     conv = Conversation(agent=agent, visualizer=None)
 
     # Trigger agent initialization by calling _ensure_agent_ready()
