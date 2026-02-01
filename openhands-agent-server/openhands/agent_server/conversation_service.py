@@ -3,6 +3,7 @@ import importlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import httpx
@@ -28,6 +29,9 @@ from openhands.sdk.conversation.state import (
 from openhands.sdk.observability.laminar import should_enable_observability
 from openhands.sdk.utils.cipher import Cipher
 
+
+if TYPE_CHECKING:
+    from lmnr import Laminar
 
 try:
     from lmnr import Laminar
@@ -66,7 +70,7 @@ class ConversationService:
         default_factory=list, init=False
     )
     # Track observability spans per conversation to avoid global stack corruption
-    _conversation_spans: dict[UUID, "Laminar"] = field(default_factory=dict, init=False)
+    _conversation_spans: dict[UUID, Any] = field(default_factory=dict, init=False)
 
     def _start_conversation_span(self, conversation_id: UUID) -> None:
         """Start an observability span for a conversation."""
