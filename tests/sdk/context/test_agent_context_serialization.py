@@ -78,3 +78,65 @@ def test_agent_context_serialization_roundtrip():
     assert isinstance(deserialized_from_json.skills[2].trigger, TaskTrigger)
     assert deserialized_from_json.skills[2] == task_skill
     assert deserialized_from_json.model_dump() == serialized
+
+
+def test_agent_context_filters_null_secrets():
+    """Test that AgentContext filters out null secrets during deserialization.
+
+    Regression test for issue #1877: When secrets cannot be decrypted
+    (e.g., cipher key changed or unavailable), they may have null values.
+    The model validator should filter them out to prevent validation errors.
+    """
+    # Simulate data with a null secret value
+    # Note: secrets use "kind" field for discriminated union (not "type")
+    data_with_null_secret = {
+        "secrets": {
+            "VALID_SECRET": {"kind": "StaticSecret", "value": "test-value"},
+            "NULL_SECRET": None,  # This would cause ValidationError
+        },
+    }
+
+    context = AgentContext.model_validate(data_with_null_secret)
+
+    # The null secret should be filtered out
+    assert context.secrets is not None
+    assert "VALID_SECRET" in context.secrets
+    assert "NULL_SECRET" not in context.secrets
+
+
+def test_agent_context_filters_masked_secrets():
+    """Test that AgentContext filters out masked secrets during deserialization.
+
+    Regression test for issue #1877: When secrets are serialized with a cipher
+    that later becomes unavailable, the value field becomes null. The model
+    validator should filter them out to prevent validation errors.
+    """
+    # Simulate data with a masked secret (value is null)
+    data_with_masked_secret = {
+        "secrets": {
+            "VALID_SECRET": {"kind": "StaticSecret", "value": "test-value"},
+            "MASKED_SECRET": {"kind": "StaticSecret", "value": None},  # Masked
+        },
+    }
+
+    context = AgentContext.model_validate(data_with_masked_secret)
+
+    # The masked secret should be filtered out
+    assert context.secrets is not None
+    assert "VALID_SECRET" in context.secrets
+    assert "MASKED_SECRET" not in context.secrets
+
+
+def test_agent_context_handles_all_secrets_null():
+    """Test that AgentContext handles case where all secrets are null/masked."""
+    data_with_all_null = {
+        "secrets": {
+            "SECRET1": None,
+            "SECRET2": {"kind": "StaticSecret", "value": None},
+        },
+    }
+
+    context = AgentContext.model_validate(data_with_all_null)
+
+    # secrets should be None when all are filtered out
+    assert context.secrets is None

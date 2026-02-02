@@ -37,7 +37,7 @@ class AgentContext(BaseModel):
     - **Runtime context**: Current execution environment (hosts, working
       directory, secrets, date, etc.).
     - **Conversation instructions**: Optional task- or channel-specific rules
-      that constrain or guide the agent’s behavior across the session.
+      that constrain or guide the agent's behavior across the session.
     - **Knowledge Skills**: Extensible components that can be triggered by user input
       to inject knowledge or domain-specific guidance.
 
@@ -45,6 +45,35 @@ class AgentContext(BaseModel):
     for assembling, formatting, and injecting all prompt-relevant context into
     LLM interactions.
     """  # noqa: E501
+
+    @model_validator(mode="before")
+    @classmethod
+    def _filter_invalid_secrets(cls, data):
+        """Filter out invalid/masked secrets during deserialization.
+
+        When secrets cannot be decrypted (e.g., cipher key changed or unavailable),
+        they may have null values. This validator filters them out to prevent
+        validation errors during conversation resume.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        secrets = data.get("secrets")
+        if not secrets or not isinstance(secrets, dict):
+            return data
+
+        filtered = {}
+        for key, value in secrets.items():
+            if value is None:
+                logger.warning(f"Skipping None secret '{key}' during deserialization")
+                continue
+            if isinstance(value, dict) and value.get("value") is None:
+                logger.warning(f"Skipping masked secret '{key}' during deserialization")
+                continue
+            filtered[key] = value
+
+        data["secrets"] = filtered if filtered else None
+        return data
 
     skills: list[Skill] = Field(
         default_factory=list,
