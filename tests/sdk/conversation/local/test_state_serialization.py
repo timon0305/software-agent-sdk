@@ -1274,3 +1274,128 @@ def test_agent_verify_fails_when_builtin_tool_removed():
     # Should fail because builtin tools don't match
     with pytest.raises(ValueError, match="tools cannot be changed mid-conversation"):
         runtime_agent.verify(persisted_agent)
+
+
+def test_conversation_state_filters_null_secret_sources():
+    """Test that ConversationState filters out null secret_sources.
+
+    Regression test for issue #1877: When secrets cannot be decrypted
+    (e.g., cipher key changed or unavailable), they may have null values.
+    The model validator should filter them out to prevent validation errors.
+    """
+    llm = LLM(model="gpt-4o-mini", api_key=SecretStr("test-key"), usage_id="test-llm")
+    agent = Agent(llm=llm, tools=[])
+
+    # Create a valid state and get its serialized form
+    state = ConversationState.create(
+        agent=agent,
+        id=uuid.UUID("12345678-1234-5678-9abc-123456789abc"),
+        workspace=LocalWorkspace(working_dir="/tmp"),
+    )
+    serialized = json.loads(state.model_dump_json())
+
+    # Inject null and masked secrets into the serialized data
+    # Note: secrets use "kind" field for discriminated union (not "type")
+    serialized["secret_registry"] = {
+        "secret_sources": {
+            "VALID_SECRET": {"kind": "StaticSecret", "value": "test-value"},
+            "NULL_SECRET": None,  # Null value - should be filtered
+            "MASKED_SECRET": {"kind": "StaticSecret", "value": None},  # Masked
+        }
+    }
+
+    # This should not raise ValidationError
+    loaded_state = ConversationState.model_validate(serialized)
+
+    # Only valid secrets should remain
+    assert "VALID_SECRET" in loaded_state.secret_registry.secret_sources
+    assert "NULL_SECRET" not in loaded_state.secret_registry.secret_sources
+    assert "MASKED_SECRET" not in loaded_state.secret_registry.secret_sources
+
+
+def test_conversation_state_filters_all_null_secret_sources():
+    """Test that ConversationState handles case where all secrets are null/masked."""
+    llm = LLM(model="gpt-4o-mini", api_key=SecretStr("test-key"), usage_id="test-llm")
+    agent = Agent(llm=llm, tools=[])
+
+    state = ConversationState.create(
+        agent=agent,
+        id=uuid.UUID("12345678-1234-5678-9abc-123456789abd"),
+        workspace=LocalWorkspace(working_dir="/tmp"),
+    )
+    serialized = json.loads(state.model_dump_json())
+
+    # All secrets are null/masked
+    serialized["secret_registry"] = {
+        "secret_sources": {
+            "SECRET1": None,
+            "SECRET2": {"kind": "StaticSecret", "value": None},
+        }
+    }
+
+    # This should not raise ValidationError
+    loaded_state = ConversationState.model_validate(serialized)
+
+    # All secrets should be filtered out, leaving empty dict
+    assert loaded_state.secret_registry.secret_sources == {}
+
+
+def test_conversation_state_resume_with_masked_secrets():
+    """Test that conversation resume works when secrets are masked/null.
+
+    Regression test for issue #1877: Conversations should resume gracefully
+    when secrets cannot be decrypted.
+    """
+    from openhands.sdk.utils.cipher import Cipher
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        llm = LLM(
+            model="gpt-4o-mini", api_key=SecretStr("test-key"), usage_id="test-llm"
+        )
+        agent = Agent(llm=llm, tools=[])
+        conv_id = uuid.UUID("12345678-1234-5678-9abc-123456789abe")
+        persist_path = LocalConversation.get_persistence_dir(temp_dir, conv_id)
+
+        # Create with cipher A
+        cipher_a = Cipher(secret_key="cipher-key-a")
+        state = ConversationState.create(
+            workspace=LocalWorkspace(working_dir="/tmp"),
+            persistence_dir=persist_path,
+            agent=agent,
+            id=conv_id,
+            cipher=cipher_a,
+        )
+
+        # Add secrets
+        state.secret_registry.update_secrets({
+            "API_KEY": "test-api-key",
+            "DB_PASSWORD": "secret-password",
+        })
+        state._save_base_state(state._fs)
+
+        # Now manually corrupt the base_state.json to simulate a scenario
+        # where decryption failed and values became null
+        base_state_path = Path(persist_path) / "base_state.json"
+        base_state_content = json.loads(base_state_path.read_text())
+
+        # Simulate what happens when cipher is wrong/unavailable - values become null
+        for key in base_state_content["secret_registry"]["secret_sources"]:
+            base_state_content["secret_registry"]["secret_sources"][key]["value"] = None
+
+        base_state_path.write_text(json.dumps(base_state_content))
+
+        # Resume the conversation - this should NOT raise ValidationError
+        resumed_state = ConversationState.create(
+            workspace=LocalWorkspace(working_dir="/tmp"),
+            persistence_dir=persist_path,
+            agent=agent,
+            id=conv_id,
+            cipher=cipher_a,  # Cipher doesn't matter - values are already null
+        )
+
+        # Conversation resumed successfully
+        assert resumed_state.id == conv_id
+
+        # Secrets were filtered out because values were null
+        assert "API_KEY" not in resumed_state.secret_registry.secret_sources
+        assert "DB_PASSWORD" not in resumed_state.secret_registry.secret_sources
