@@ -163,6 +163,44 @@ class ConversationState(OpenHandsModel):
             data["secret_registry"] = data.pop("secrets_manager")
         return data
 
+    @model_validator(mode="before")
+    @classmethod
+    def _filter_invalid_secret_sources(cls, data: Any) -> Any:
+        """Filter out invalid/masked secrets from secret_registry.
+
+        When secrets cannot be decrypted (e.g., cipher key changed or unavailable),
+        they may have null values. This validator filters them out to prevent
+        validation errors during conversation resume.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        secret_registry = data.get("secret_registry")
+        if not secret_registry or not isinstance(secret_registry, dict):
+            return data
+
+        secret_sources = secret_registry.get("secret_sources")
+        if not secret_sources or not isinstance(secret_sources, dict):
+            return data
+
+        filtered = {}
+        for key, value in secret_sources.items():
+            if value is None:
+                logger.warning(
+                    f"Skipping None secret_source '{key}' during deserialization"
+                )
+                continue
+            if isinstance(value, dict) and value.get("value") is None:
+                logger.warning(
+                    f"Skipping masked secret_source '{key}' during deserialization"
+                )
+                continue
+            filtered[key] = value
+
+        secret_registry["secret_sources"] = filtered
+        data["secret_registry"] = secret_registry
+        return data
+
     @property
     def events(self) -> EventLog:
         return self._events
