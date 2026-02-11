@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import warnings
+from uuid import uuid4
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args, get_origin
@@ -121,8 +122,6 @@ def generate_usage_id(prefix: str = "llm") -> str:
         >>> usage_id = generate_usage_id("my-agent")
         >>> llm = LLM(model="gpt-4o", usage_id=usage_id, ...)
     """
-    from uuid import uuid4
-
     return f"{prefix}-{uuid4().hex[:8]}"
 
 
