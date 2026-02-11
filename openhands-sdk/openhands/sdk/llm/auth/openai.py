@@ -557,14 +557,12 @@ class OpenAISubscriptionAuth:
         Raises:
             ValueError: If the model is not supported or no credentials available.
         """
-        from uuid import uuid4
-
-        from openhands.sdk.llm.llm import LLM
+        from openhands.sdk.llm.llm import LLM, generate_usage_id
 
         # Auto-generate unique usage_id if not provided to avoid registry conflicts
         # when creating multiple LLMs (e.g., for agent and condenser)
         if "usage_id" not in llm_kwargs:
-            llm_kwargs["usage_id"] = f"chatgpt-subscription-{uuid4().hex[:8]}"
+            llm_kwargs["usage_id"] = generate_usage_id("chatgpt-subscription")
 
         if model not in OPENAI_CODEX_MODELS:
             raise ValueError(
